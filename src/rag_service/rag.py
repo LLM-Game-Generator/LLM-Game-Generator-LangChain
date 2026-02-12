@@ -3,6 +3,7 @@ import chromadb.errors
 import hashlib
 import requests
 import urllib3
+import re
 from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
 from chromadb.config import Settings
 from chromadb.utils import embedding_functions
@@ -11,11 +12,15 @@ from typing import Optional, List, Dict, Any
 
 from src.config import config
 
-# 禁用 SSL 憑證警告 (讓 Log 乾淨一點)
+# Disable SSL certificate warnings for cleaner logs
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class RemoteOllamaAuthEF(EmbeddingFunction):
+    """
+    Custom Embedding Function for remote Ollama server with Authorization header.
+    """
+
     def __init__(self, base_url: str, api_key: str, model_name: str = "nomic-embed-text", timeout: int = 30):
         base_url = base_url.rstrip("/")
         self.api_url = f"{base_url}/api/embeddings"
@@ -77,6 +82,8 @@ class RagService:
             rag_config = RagConfig()
 
         self.config = rag_config
+
+        # Initialize Embedding Function
         self.embedding_function = self._get_embedding_function(
             rag_config.provider,
             rag_config.base_url,
@@ -85,15 +92,30 @@ class RagService:
             rag_config.embedding_token
         )
 
-        # 初始化 Client (包含自動 fallback 邏輯)
+        # Initialize Client (includes auto-fallback logic)
         self.client = self._get_client(rag_config)
 
-        actual_collection_name = rag_config.collection_name
-        print(f"[RAG] Using Collection: {actual_collection_name}")
+        # Validate and sanitize collection name
+        raw_name = rag_config.collection_name
+
+        # Handle empty name
+        if not raw_name or not raw_name.strip():
+            print("[RAG] Collection name is empty/None. Defaulting to 'arcade_v2_knowledge'.")
+            raw_name = "arcade_v2_knowledge"
+
+        # Sanitize name: ChromaDB requires [a-zA-Z0-9._-] and must start/end with alphanumeric
+        clean_name = re.sub(r'[^a-zA-Z0-9._-]', '', raw_name)
+        clean_name = clean_name.strip("._-")
+
+        # Length check (minimum 3 chars)
+        if len(clean_name) < 3:
+            clean_name += "_doc"
+
+        print(f"[RAG] Using Collection: {clean_name}")
         print(f"[RAG] Embedding Model: {rag_config.model_type} ({rag_config.provider})")
 
         self.collection = self.client.get_or_create_collection(
-            name=actual_collection_name,
+            name=clean_name,
             embedding_function=self.embedding_function,
             metadata={"hnsw:space": "cosine"}
         )
@@ -112,7 +134,7 @@ class RagService:
         elif mode == 'http':
             print(f"[RAG] Connecting to Chroma HTTP ({config.host}:{config.port})...")
 
-            # 準備 Headers
+            # Prepare Headers
             request_headers = {}
             if config.cf_client_id and config.cf_client_secret:
                 request_headers["CF-Access-Client-Id"] = config.cf_client_id
@@ -122,7 +144,7 @@ class RagService:
                 request_headers["X-Chroma-Token"] = config.chroma_server_auth_credentials
                 request_headers["Authorization"] = f"Bearer {config.chroma_server_auth_credentials}"
 
-            # 準備 Settings
+            # Prepare Settings
             chroma_settings = Settings()
             if config.ssl:
                 chroma_settings.chroma_server_ssl_verify = config.ssl_verify
@@ -133,10 +155,10 @@ class RagService:
 
             target_db = config.database
 
-            # --- 邏輯：嘗試連接指定 DB，失敗則回退到 default_database ---
+            # Logic: Try connecting to the target DB, fallback to default_database if failed.
             if target_db != "default_database":
                 try:
-                    # 1. 嘗試透過 API 建立 (忽略 405/409 錯誤)
+                    # Attempt to create via API (ignore errors)
                     try:
                         protocol = "https" if config.ssl else "http"
                         api_url = f"{protocol}://{config.host}:{config.port}/api/v1/databases"
@@ -149,9 +171,9 @@ class RagService:
                             timeout=3
                         )
                     except Exception:
-                        pass  # API 建立失敗不重要，重點是下面能不能連上
+                        pass  # API creation failure is non-critical here
 
-                    # 2. 嘗試連線
+                    # Attempt connection
                     client = chromadb.HttpClient(
                         host=config.host,
                         port=config.port,
@@ -161,17 +183,17 @@ class RagService:
                         tenant=config.tenant,
                         database=target_db
                     )
-                    # 測試連線 (這一步很重要，如果 DB 不存在會拋錯)
+                    # Test connection heartbeat
                     client.heartbeat()
-                    print(f"[RAG] ✅ Connected to database: '{target_db}'")
+                    print(f"[RAG] Connected to database: '{target_db}'")
                     return client
 
                 except Exception as e:
-                    print(f"[RAG] ⚠️ Could not connect to '{target_db}' (Error: {e})")
-                    print(f"[RAG] 🔄 Fallback to 'default_database'.")
-                    # 連接失敗，繼續往下執行，使用 default_database
+                    print(f"[RAG] Could not connect to '{target_db}' (Error: {e})")
+                    print(f"[RAG] Fallback to 'default_database'.")
+                    # Fallback proceeds below
 
-            # 3. 最終手段：使用預設資料庫
+            # Last resort: Use default database
             return chromadb.HttpClient(
                 host=config.host,
                 port=config.port,
@@ -247,5 +269,5 @@ class RagService:
             return f"RAG Query Error: {str(e)}"
 
 
-# 全域實例
+# Global Instance
 rag_instance = RagService()
