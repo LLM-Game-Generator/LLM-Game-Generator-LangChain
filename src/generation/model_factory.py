@@ -1,6 +1,7 @@
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from src.config import config
+import os
 
 def get_langchain_model(provider: str = "openai", model_name: str = None, temperature: float = 0.2):
     """
@@ -8,7 +9,6 @@ def get_langchain_model(provider: str = "openai", model_name: str = None, temper
     Ensures the correct model name is used for each specific provider's API.
     """
     provider = provider.lower()
-    max_tokens = 8192
 
     # --- Force correct model matching per provider ---
     # If no specific model_name is passed from the UI, use the pre-configured ones.
@@ -33,8 +33,7 @@ def get_langchain_model(provider: str = "openai", model_name: str = None, temper
         return ChatOpenAI(
             model=model_name,
             api_key=config.OPENAI_API_KEY,
-            temperature=temperature,
-            max_tokens=max_tokens
+            temperature=temperature
         )
 
     # --- 2. Google Gemini ---
@@ -42,8 +41,7 @@ def get_langchain_model(provider: str = "openai", model_name: str = None, temper
         return ChatGoogleGenerativeAI(
             model=model_name,
             google_api_key=config.GOOGLE_API_KEY,
-            temperature=temperature,
-            max_tokens=max_tokens
+            temperature=temperature
         )
 
     # --- 3. Ollama (Local) ---
@@ -56,8 +54,7 @@ def get_langchain_model(provider: str = "openai", model_name: str = None, temper
         return ChatOllama(
             model=model_name,
             base_url=base_url,
-            temperature=temperature,
-            max_tokens=max_tokens
+            temperature=temperature
         )
 
     # --- 4. Groq ---
@@ -66,8 +63,7 @@ def get_langchain_model(provider: str = "openai", model_name: str = None, temper
             model=model_name,
             api_key=config.GROQ_API_KEY,
             base_url="https://api.groq.com/openai/v1",
-            temperature=temperature,
-            max_tokens=max_tokens
+            temperature=temperature
         )
 
     # --- 5. Mistral ---
@@ -76,8 +72,7 @@ def get_langchain_model(provider: str = "openai", model_name: str = None, temper
             model=model_name,
             api_key=config.MISTRAL_API_KEY,
             base_url="https://api.mistral.ai/v1",
-            temperature=temperature,
-            max_tokens=max_tokens
+            temperature=temperature
         )
 
     # --- 6. DeepSeek ---
@@ -86,8 +81,7 @@ def get_langchain_model(provider: str = "openai", model_name: str = None, temper
             model=model_name,
             api_key=config.DEEPSEEK_API_KEY,
             base_url="https://api.deepseek.com",
-            temperature=temperature,
-            max_tokens=max_tokens
+            temperature=temperature
         )
 
     # --- 7. Inception ---
@@ -96,8 +90,7 @@ def get_langchain_model(provider: str = "openai", model_name: str = None, temper
             model=model_name,
             api_key=config.INCEPTION_API_KEY,
             base_url="https://api.inceptionlabs.ai/v1",
-            temperature=temperature,
-            max_tokens=max_tokens
+            temperature=temperature
         )
 
     # --- Default Fallback ---
@@ -105,6 +98,5 @@ def get_langchain_model(provider: str = "openai", model_name: str = None, temper
     return ChatOpenAI(
         model="gpt-4o-mini",
         api_key=config.OPENAI_API_KEY,
-        temperature=temperature,
-        max_tokens=max_tokens
+        temperature=temperature
     )
