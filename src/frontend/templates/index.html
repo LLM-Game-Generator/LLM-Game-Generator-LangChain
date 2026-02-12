@@ -40,17 +40,14 @@
 </head>
 <body>
     <div class="container">
-        <h1>🎮 Arcade 2.x Game Generator</h1>
+        <h1>Arcade 2.x Game Generator</h1>
 
         <div class="input-group">
             <label for="providerSelect">Select AI Provider:</label>
             <select id="providerSelect">
-                <option value="openai" selected>OpenAI (GPT-4o)</option>
-                <option value="google">Google (Gemini 2.5 Flash)</option>
-                <option value="groq">Groq (Llama 3 70B)</option>
-                <option value="mistral">Mistral (Large)</option>
-                <option value="deepseek">DeepSeek (V3)</option>
-                <option value="ollama">Ollama (Local Llama 3)</option>
+                {% for provider in providers %}
+                <option value="{{ provider }}">{{ provider|capitalize }}</option>
+                {% endfor %}
             </select>
         </div>
 
@@ -114,12 +111,12 @@
                 console.log(data);
                 addLog('System', `Finished! Path: ${data.path}`);
                 btn.disabled = false;
-                btn.innerText = "🚀 Generate Game";
+                btn.innerText = "Generate Game";
             })
             .catch(err => {
                 addLog('Error', 'Request failed: ' + err);
                 btn.disabled = false;
-                btn.innerText = "🚀 Generate Game";
+                btn.innerText = "Generate Game";
             });
         }
     </script>

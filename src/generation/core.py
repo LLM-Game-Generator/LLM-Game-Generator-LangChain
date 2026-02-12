@@ -1,9 +1,12 @@
 import os
 from src.generation.chains import ArcadeAgentChain
-from src.utils import clean_code_content
+from src.generation.asset_gen import generate_assets
+from src.utils import clean_code_content, save_generated_files
+from src.config import config
+from src.testing.runner import run_fuzz_test
 
 
-def run_design_phase(user_input, log_callback=print, provider="openai", model="gpt-4o"):
+def run_design_phase(user_input, log_callback=print, provider="openai", model=None):
     """
     執行設計階段：CEO -> CPO -> Reviewer 循環
     """
@@ -31,130 +34,161 @@ def run_design_phase(user_input, log_callback=print, provider="openai", model="g
     return final_gdd
 
 
-def run_production_pipeline(gdd_context, asset_json, log_callback=print, provider="openai", model=None):
+def run_plan_phase(gdd_context, asset_json, log_callback=print, provider="openai", model=None):
     """
-    執行生產階段，強制產出單一 game.py 檔案。
+    [NEW] 執行架構規劃階段 (含 Plan Review Loop)
+    確保在寫代碼前，架構圖符合 Arcade 2.x API 規範。
     """
     agents = ArcadeAgentChain(provider, model)
 
-    # 1. 獲取架構計畫
-    log_callback("[Architect] 規劃系統架構...")
+    log_callback("[Architect] Planning system architecture...")
+
+    # 1. Initial Plan
     plan = agents.get_architect_chain().invoke({
         "gdd": gdd_context,
         "assets": asset_json,
         "format_instructions": agents.json_parser.get_format_instructions()
     })
 
-    # 2. 強制單一檔案生成 (game.py)
-    log_callback("[Programmer] 正在實作 game.py (整合所有邏輯)...")
-    response = agents.get_programmer_chain().invoke({
-        "architecture_plan": plan.get('architecture', ''),
-        "constraints": "\n".join(plan.get('constraints', []))
-    })
+    # 2. Plan Review Loop (Optional but recommended)
+    # 這裡可以加入一個簡單的 Review 步驟，讓 Architect 自我修正
+    log_callback("[Reviewer] Validating architecture plan...")
+    review_feedback = agents.get_plan_reviewer_chain().invoke({"plan": str(plan)})
 
-    # 獲取內容並進行代碼清洗 (移除解釋性文字)
-    content = response.content if hasattr(response, 'content') else str(response)
-    cleaned_code = clean_code_content(content)
+    # 將 Review 意見附加回 Plan 中 (這裡簡化處理，直接傳給 Programmer)
+    return plan, review_feedback
 
-    # 只回傳一個檔案
-    return {"game.py": cleaned_code}
 
-def run_test_and_fix_phase(project_files, work_dir, log_callback=print, provider="openai", model="gpt-4o"):
+def run_production_pipeline(gdd_context, asset_json, log_callback=print, provider="openai", model=None):
     """
-    [NEW] 執行測試與修復階段：
-    1. 寫入檔案 (Fuzzer 需要實體檔案)
-    2. Fuzzer Loop (Runtime Fixer)
-    3. Logic Loop (Static Analysis Fixer)
+    執行生產階段，強制產出單一 game.py 檔案。
+    現在包含 Plan Review 流程。
     """
     agents = ArcadeAgentChain(provider, model)
 
-    # 0. Ensure the file has been written to disk for the Fuzzer to run
+    # 1. Plan Phase with Review
+    plan, review_feedback = run_plan_phase(gdd_context, asset_json, log_callback, provider, model)
+
+    # 2. Single file generation with constraints & review feedback
+    log_callback("[Programmer] Implementing game.py (integrating logic)...")
+
+    # 組合約束條件與 Review 意見
+    complexity_constraints = (
+        "1. Write verbose code with detailed comments.\n"
+        "2. Implement at least 3 different enemy types or obstacles if applicable.\n"
+        "3. Include a 'ParticleManager' class for visual effects.\n"
+        "4. ABSOLUTELY NO ABBREVIATED CODE. WRITE EVERY LINE."
+    )
+    constraints = "\n".join(plan.get('constraints', []))
+    full_constraints = f"{constraints}\n\n{complexity_constraints}"
+
+    response = agents.get_programmer_chain().invoke({
+        "architecture_plan": plan.get('architecture', ''),
+        "review_feedback": review_feedback,
+        "constraints": full_constraints
+    })
+
+    # Get the content and clean it
+    content = response.content if hasattr(response, 'content') else str(response)
+    cleaned_code = clean_code_content(content)
+
+    return {"game.py": cleaned_code}
+
+
+def run_test_and_fix_phase(project_files, work_dir, log_callback=print, provider="openai", model=None):
+    """
+    執行測試與修復階段 (Fuzzer + Static Analysis)
+    """
+    agents = ArcadeAgentChain(provider, model)
+
     if not os.path.exists(work_dir):
         os.makedirs(work_dir)
 
-    for filename, content in project_files.items():
-        file_path = os.path.join(work_dir, filename)
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(content)
+    main_filename = "game.py"
+    main_file_path = os.path.join(work_dir, main_filename)
 
-    main_file = os.path.join(work_dir, "main.py")
-    if not os.path.exists(main_file):
-        log_callback("[Test] ⚠️ main.py not found. Skipping tests.")
+    save_generated_files(project_files, work_dir)
+
+    if main_filename not in project_files:
+        log_callback(f"[Test] {main_filename} not found. Skipping tests.")
         return project_files
 
-    # 1. Runtime Fuzzing & Syntax Fixer Loop
+    # --- 1. Runtime Fuzzing Loop ---
     max_retries = 3
     for attempt in range(max_retries):
-        log_callback(f"[Test] 🧪 Running Fuzzer (Attempt {attempt + 1}/{max_retries})...")
+        log_callback(f"[Test] Running Fuzzer (Attempt {attempt + 1}/{max_retries})...")
 
-        # Dynamically import the runner to avoid circular imports and only require it when testing
-        try:
-            from src.testing.runner import run_fuzz_test
-        except ImportError:
-            log_callback("[Test] ⚠️ Runner not found. Skipping Fuzz test.")
-            break
-
-        success, error_msg = run_fuzz_test(main_file, duration=5)
+        success, error_msg = run_fuzz_test(main_file_path, duration=5)
 
         if success:
-            log_callback("[Test] ✅ Fuzzer Passed (Runtime Safe).")
+            log_callback("[Test] Fuzzer Passed (Runtime Safe).")
             break
 
-        log_callback(f"[Test] ❌ Runtime Crash Detected:\n{error_msg}")
-        log_callback("[Fixer] 🔧 Engaging Syntax Fixer...")
+        log_callback(f"[Test] Runtime Crash Detected:\n{error_msg}")
+        log_callback("[Fixer] Fixing Syntax/Runtime errors...")
 
-        # Read the broken code for the fixer
-        with open(main_file, "r", encoding="utf-8") as f:
+        with open(main_file_path, "r", encoding="utf-8") as f:
             broken_code = f.read()
 
-        # 呼叫 Syntax Fixer Chain
-        fixer_chain = agents.get_syntax_fixer_chain()
-        fixed_code = fixer_chain.invoke({
+        fixed_response = agents.get_syntax_fixer_chain().invoke({
             "code": broken_code,
             "error": error_msg
         })
 
-        # 清理並儲存
-        fixed_code = fixed_code.replace("```python", "").replace("```", "").strip()
-        with open(main_file, "w", encoding="utf-8") as f:
-            f.write(fixed_code)
+        cleaned_fixed_code = clean_code_content(fixed_response)
+        project_files[main_filename] = cleaned_fixed_code
 
-        project_files["main.py"] = fixed_code
-        log_callback("[Fixer] ✅ Code patched and saved.")
+        with open(main_file_path, "w", encoding="utf-8") as f:
+            f.write(cleaned_fixed_code)
 
-    # 2. Static Logic Review & Fixer Loop
-    log_callback("[Review] 🧐 Running Static Logic Analysis...")
-    reviewer_chain = agents.get_logic_reviewer_chain()
-    fixer_chain = agents.get_logic_fixer_chain()
+        log_callback("[Fixer] Code patched and saved.")
 
-    # 針對主要邏輯檔案進行檢查
-    target_files = ["main.py", "logic.py"]
-    for filename in target_files:
-        if filename not in project_files:
-            continue
+    # --- 2. Static Logic Review Loop ---
+    log_callback("[Review] Running Static Logic Analysis...")
 
-        code = project_files[filename]
-        review_result = reviewer_chain.invoke({"code": code})
+    current_code = project_files.get(main_filename, "")
+    review_result = agents.get_logic_reviewer_chain().invoke({"code": current_code})
 
-        # 如果 Reviewer 回傳 FAIL
-        if "FAIL" in review_result:
-            log_callback(f"[Review] ⚠️ Logic Issue in {filename}: {review_result}")
-            log_callback(f"[Fixer] 🧠 Fixing Logic in {filename}...")
+    if "PASS" in review_result:
+        log_callback("[Review] Code complies with Arcade 2.x standards.")
+    else:
+        log_callback(f"[Review] Issues found: {review_result}")
+        log_callback("[Fixer] Fixing logic/API issues...")
 
-            fixed_code = fixer_chain.invoke({
-                "code": code,
-                "error": review_result
-            })
+        logic_fixed_response = agents.get_logic_fixer_chain().invoke({
+            "code": current_code,
+            "error": review_result
+        })
 
-            fixed_code = fixed_code.replace("```python", "").replace("```", "").strip()
+        final_code = clean_code_content(logic_fixed_response)
+        project_files[main_filename] = final_code
 
-            # 寫回檔案與更新字典
-            with open(os.path.join(work_dir, filename), "w", encoding="utf-8") as f:
-                f.write(fixed_code)
-            project_files[filename] = fixed_code
+        with open(main_file_path, "w", encoding="utf-8") as f:
+            f.write(final_code)
 
-            log_callback(f"[Fixer] ✅ {filename} logic patched.")
-        else:
-            log_callback(f"[Review] ✅ {filename} passed logic check.")
+        log_callback("[Fixer] Logic fixed.")
+
+    return project_files
+
+
+def run_full_generator_pipeline(user_input, log_callback=print, provider="openai"):
+    """
+    [Unified Entry Point]
+    Encapsulates the entire generation process: Design -> Asset -> Production -> Test.
+    """
+    # 1. Design Phase
+    gdd = run_design_phase(user_input, log_callback, provider)
+
+    # 2. Asset Phase
+    log_callback("[System] Generating Assets...")
+    assets = generate_assets(gdd, provider=provider)
+
+    # 3. Production Phase (Now includes Plan Review)
+    project_files = run_production_pipeline(gdd, assets, log_callback, provider)
+
+    # 4. Test & Fix Phase
+    log_callback("[System] Starting Test & Fix Loop...")
+    output_path = os.path.join(config.OUTPUT_DIR, "generated_game")
+    project_files = run_test_and_fix_phase(project_files, output_path, log_callback, provider)
 
     return project_files

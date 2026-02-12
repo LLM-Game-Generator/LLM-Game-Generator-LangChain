@@ -1,11 +1,8 @@
 import os
 from dotenv import load_dotenv
-
-# 載入 .env 檔案
 load_dotenv()
 
 
-# --- 輔助函式 ---
 def get_env_int(key: str, default: int) -> int:
     value = os.getenv(key)
     if value is None: return default
@@ -72,7 +69,6 @@ class Config:
     CHROMA_TENANT = os.getenv("CHROMA_TENANT", "default_tenant")
     CHROMA_DATABASE = os.getenv("CHROMA_DATABASE", "default_database")
 
-    # [FIX] 這裡更新為您的正確 Collection Name
     CHROMA_COLLECTION_NAME = os.getenv("CHROMA_COLLECTION_NAME", "arcade_v2_knowledge")
 
     CHROMA_CLIENT_TYPE = os.getenv("CHROMA_CLIENT_TYPE", "persistent")
@@ -91,7 +87,6 @@ class Config:
     CF_ACCESS_CLIENT_SECRET = os.getenv("CF_ACCESS_CLIENT_SECRET", None)
 
     ARCADE_SOURCE_DIR = os.path.join(PROJECT_ROOT, "arcade_rag_knowledge_base")
-    # 確保兩者一致
     ARCADE_COLLECTION_NAME = CHROMA_COLLECTION_NAME
 
 

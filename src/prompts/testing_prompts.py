@@ -11,7 +11,7 @@ I tried to run an Arcade script, but it crashed or had errors.
 
    - **TypeError: Texture.__init__() missing 1 required positional argument: 'name'**:
      - **CAUSE**: In Arcade 2.x, the Texture constructor REQUIRES a unique name string.
-     - **FIX**: Change `arcade.Texture(image)` to `arcade.Texture(f"unique_name_{id(self)}", image)`.
+     - **FIX**: Change `arcade.Texture(image)` to `arcade.Texture(f"unique_name_{{id(self)}}", image)`.
 
    - **AttributeError: 'NoneType' object has no attribute ...**:
      - **CAUSE**: Accessing attributes on a grid cell or sprite that is `None`.
