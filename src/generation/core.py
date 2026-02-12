@@ -1,5 +1,6 @@
 import os
 import json
+import sys
 from src.generation.chains import ArcadeAgentChain
 from src.generation.asset_gen import generate_assets
 from src.utils import clean_code_content, save_generated_files
@@ -120,7 +121,7 @@ def run_production_pipeline(gdd_context, asset_json, log_callback=print, provide
     return {"game.py": cleaned_code}
 
 
-def run_test_and_fix_phase(project_files, work_dir, log_callback=print, provider="openai", model=None):
+def run_test_and_fix_phase(project_files, work_dir, log_callback=print, provider="openai", model=None, gdd: str = None):
     agents = ArcadeAgentChain(provider, model)
 
     if not os.path.exists(work_dir):
@@ -135,88 +136,149 @@ def run_test_and_fix_phase(project_files, work_dir, log_callback=print, provider
         log_callback(f"[Test] {main_filename} not found. Skipping tests.")
         return project_files
 
+    # --- 0. Generate Fuzzer Logic ---
+    log_callback("[Test] Generating Fuzzer logic snippet...")
+
+    fuzzer_response = agents.get_fuzzer_chain().invoke({"gdd": gdd})
+    fuzzer_logic = fuzzer_response.content if hasattr(fuzzer_response, 'content') else str(fuzzer_response)
+
+    cleaned_fuzzer_logic = clean_code_content(fuzzer_logic)
+    fuzzer_file_path = os.path.join(work_dir, "fuzz_logic.py")
+    with open(fuzzer_file_path, "w", encoding="utf-8") as f:
+        f.write(cleaned_fuzzer_logic)
+    project_files["fuzz_logic.py"] = cleaned_fuzzer_logic
+
     # --- 1. Runtime Fuzzing Loop ---
-    max_retries = 3
-    for attempt in range(max_retries):
-        log_callback(f"[Test] Running Fuzzer (Attempt {attempt + 1}/{max_retries})...")
+    max_retries = 5
+    is_valid = False
+
+    while (not is_valid) and (max_retries > 0):
+        current_code = project_files.get(main_filename, "")
+        log_callback(f"\n[Test] 開始新一輪驗證 (剩餘嘗試次數: {max_retries})")
+
+        # --- 階段 A: 語法檢查 (Syntax Check) ---
+        log_callback("[Check] 執行靜態語法檢查...")
+        try:
+            compile(current_code, main_filename, 'exec')
+            log_callback("✅ 語法正確")
+        except SyntaxError as e:
+            error_msg = f"Line {e.lineno}: {e.msg}\n{e.text}"
+            log_callback(f"❌ 語法錯誤: {error_msg} (嘗試修復中...)")
+
+            syntax_fixed_response = agents.get_syntax_fixer_chain().invoke({
+                "code": current_code,
+                "error": error_msg
+            })
+
+            updated_code = clean_code_content(syntax_fixed_response)
+            project_files[main_filename] = updated_code
+            with open(main_file_path, "w", encoding="utf-8") as f:
+                f.write(updated_code)
+
+            max_retries -= 1
+            log_callback("[Fixer] 語法已修復，重新開始驗證流程。")
+            continue
+
+        # --- 階段 B: 邏輯檢查 (Logic Review) ---
+        log_callback("[Review] 執行邏輯與 API 標準檢查...")
+        review_result = agents.get_logic_reviewer_chain().invoke({"code": current_code})
+
+        if "PASS" not in review_result:
+            log_callback(f"❌ 邏輯錯誤: {review_result} (嘗試修復中...)")
+
+            logic_fixed_response = agents.get_logic_fixer_chain().invoke({
+                "code": current_code,
+                "error": review_result,
+                "gdd": gdd
+            })
+
+            updated_code = clean_code_content(logic_fixed_response)
+            project_files[main_filename] = updated_code
+            with open(main_file_path, "w", encoding="utf-8") as f:
+                f.write(updated_code)
+
+            max_retries -= 1
+            log_callback("[Fixer] 邏輯已修復，重新開始驗證流程。")
+            continue
+
+        log_callback("✅ 邏輯正確")
+
+        # --- 階段 C: 運行時測試 (Fuzzer Test) ---
+        log_callback("[Test] 執行 Fuzzer 運行測試...")
 
         try:
-            import sys
             root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
             if root_dir not in sys.path:
                 sys.path.append(root_dir)
             from src.testing.runner import run_fuzz_test
-        except ImportError:
-            log_callback("[Test] Runner not found. Skipping Fuzz test.")
+
+            # 這裡的 duration 可以根據 config 調整
+            success, error_msg = run_fuzz_test(main_file_path, duration=30)
+        except Exception as e:
+            log_callback(f"[Error] 測試執行器異常: {str(e)}")
             break
 
-        success, error_msg = run_fuzz_test(main_file_path, duration=5)
+        if not success:
+            log_callback(f"❌ 運行時錯誤 (Fuzzer): {error_msg} (嘗試修復中...)")
 
-        if success:
-            log_callback("[Test] Fuzzer Passed (Runtime Safe).")
-            break
+            # 運行時崩潰通常也由語法修復鏈處理，或您可以定義專門的 runtime fixer
+            fixed_response = agents.get_syntax_fixer_chain().invoke({
+                "code": current_code,
+                "error": error_msg
+            })
 
-        log_callback(f"[Test] Runtime Crash Detected:\n{error_msg}")
-        log_callback("[Fixer] Fixing Syntax/Runtime errors...")
+            updated_code = clean_code_content(fixed_response)
+            project_files[main_filename] = updated_code
+            with open(main_file_path, "w", encoding="utf-8") as f:
+                f.write(updated_code)
 
-        with open(main_file_path, "r", encoding="utf-8") as f:
-            broken_code = f.read()
+            max_retries -= 1
+            log_callback("[Fixer] 運行錯誤已修復，重新開始驗證流程。")
+            continue
 
-        fixed_response = agents.get_syntax_fixer_chain().invoke({
-            "code": broken_code,
-            "error": error_msg
-        })
+        log_callback("✅ 運行功能正確")
 
-        cleaned_fixed_code = clean_code_content(fixed_response)
-        project_files[main_filename] = cleaned_fixed_code
+        # 通過所有關卡
+        is_valid = True
 
-        with open(main_file_path, "w", encoding="utf-8") as f:
-            f.write(cleaned_fixed_code)
-
-        log_callback("[Fixer] Code patched and saved.")
-
-    # --- 2. Static Logic Review Loop ---
-    log_callback("[Review] Running Static Logic Analysis...")
-
-    current_code = project_files.get(main_filename, "")
-    review_result = agents.get_logic_reviewer_chain().invoke({"code": current_code})
-
-    if "PASS" in review_result:
-        log_callback("[Review] Code complies with Arcade 2.x standards.")
+    # --- 2. 結束處理 ---
+    if is_valid:
+        log_callback("[Result] RESULT_SUCCESS: 程式碼通過所有驗證！")
     else:
-        log_callback(f"[Review] Issues found: {review_result}")
-        log_callback("[Fixer] Fixing logic/API issues...")
-
-        logic_fixed_response = agents.get_logic_fixer_chain().invoke({
-            "code": current_code,
-            "error": review_result
-        })
-
-        final_code = clean_code_content(logic_fixed_response)
-        project_files[main_filename] = final_code
-
-        with open(main_file_path, "w", encoding="utf-8") as f:
-            f.write(final_code)
-
-        log_callback("[Fixer] Logic fixed.")
+        log_callback("[Result] RESULT_FAIL: 已達最大重試次數，驗證失敗。")
 
     return project_files
 
-
 def run_full_generator_pipeline(user_input, log_callback=print, provider="openai"):
     # 1. Design Phase
-    gdd = run_design_phase(user_input, log_callback, provider)
+    gdd = run_design_phase(
+        user_input=user_input,
+        log_callback=log_callback,
+        provider=provider
+    )
 
     # 2. Asset Phase
     log_callback("[System] Generating Assets...")
-    assets = generate_assets(gdd, provider=provider)
+    assets = generate_assets(gdd_context=gdd, provider=provider)
 
     # 3. Production Phase (Now includes Iterative Planning & Math Injection)
-    project_files = run_production_pipeline(gdd, assets, log_callback, provider)
+    project_files = run_production_pipeline(
+        gdd_context=gdd,
+        asset_json=assets,
+        log_callback=log_callback,
+        provider=provider
+    )
 
     # 4. Test & Fix Phase
     log_callback("[System] Starting Test & Fix Loop...")
     output_path = os.path.join(config.OUTPUT_DIR, "generated_game")
-    project_files = run_test_and_fix_phase(project_files, output_path, log_callback, provider)
+    project_files = run_test_and_fix_phase(
+        project_files=project_files,
+        work_dir=output_path,
+        log_callback=log_callback,
+        provider=provider,
+        model=None,
+        gdd=gdd
+    )
 
     return project_files

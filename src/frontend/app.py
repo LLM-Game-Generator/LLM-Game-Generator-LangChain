@@ -14,7 +14,7 @@ app.config['SECRET_KEY'] = config.SECRET_KEY
 
 # Use 'threading' async_mode to ensure compatibility with standard Flask execution
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
-providers = ["openai", "mistral", "groq", "google", "deepseek", "inception"]
+providers = ["mistral", "openai", "groq", "google", "deepseek", "inception"]
 
 def stream_log(message):
     """

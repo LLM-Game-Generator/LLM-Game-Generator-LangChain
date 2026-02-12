@@ -87,7 +87,7 @@ class Config:
     CF_ACCESS_CLIENT_SECRET = os.getenv("CF_ACCESS_CLIENT_SECRET", None)
 
     ARCADE_SOURCE_DIR = os.path.join(PROJECT_ROOT, "arcade_rag_knowledge_base")
-    ARCADE_COLLECTION_NAME = CHROMA_COLLECTION_NAME
+    ARCADE_COLLECTION_NAME = "arcade_v2_knowledge"
 
 
 config = Config()

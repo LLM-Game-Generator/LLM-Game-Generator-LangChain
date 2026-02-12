@@ -9,7 +9,8 @@ from src.prompts.code_generation_prompts import (
     ARCHITECT_SYSTEM_PROMPT,
     PROGRAMMER_PROMPT_TEMPLATE,
     COMMON_DEVELOPER_INSTRUCTION,
-    PLAN_REVIEW_PROMPT
+    PLAN_REVIEW_PROMPT,
+    FUZZER_GENERATION_PROMPT
 )
 from src.prompts.design_prompts import CEO_PROMPT, CPO_PROMPT, CPO_REVIEW_PROMPT
 from src.prompts.testing_prompts import FIXER_PROMPT, LOGIC_REVIEW_PROMPT, LOGIC_FIXER_PROMPT
@@ -90,7 +91,18 @@ class ArcadeAgentChain:
         """
         llm_with_tools = self.llm.bind_tools(ARCADE_LANGCHAIN_TOOLS)
 
-        combined_system = f"{PROGRAMMER_PROMPT_TEMPLATE}\n\n{COMMON_DEVELOPER_INSTRUCTION}"
+        combined_system = f"{PROGRAMMER_PROMPT_TEMPLATE}"
+
+        legacy_conventions = """
+    ARCADE 2.x (LEGACY) MANDATORY CONVENTIONS:
+    1. Drawing: Use 'draw_rectangle_filled' (center_x, center_y, width, height, color). 
+       DO NOT use Arcade 3.0 'draw_rect_filled' or XYWH objects.
+    2. Rendering: You MUST call 'arcade.start_render()' as the first line in 'on_draw'.
+    3. Textures: The 'arcade.Texture(name, image)' constructor REQUIRES a unique name string as the first argument.
+    4. Sprite Update: The 'update()' method for Sprites typically takes NO arguments. 
+       Do NOT include 'delta_time' in Sprite.update unless manually passed.
+    5. Grid Safety: Always verify 'if grid[r][c] is not None:' before accessing its attributes.
+    """
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", combined_system),
@@ -98,15 +110,16 @@ class ArcadeAgentChain:
              "Architecture Context:\n{architecture_plan}\n\n"
              "Review Feedback:\n{review_feedback}\n\n"
              "Technical Constraints:\n{constraints}\n\n"
+             f"RULES & HELPERS:\n{legacy_conventions}\n\n"
              "Math & Physics Formulas (MANDATORY):\n{math_context}\n\n"
              "TASK: Implement the FULL game logic in 'game.py'.\n"
              "Output ONLY the code block.")
         ])
-        return prompt | llm_with_tools
+        return prompt
 
     # --- Phase 3: Testing & Fixing ---
     def get_syntax_fixer_chain(self):
-        combined_prompt = f"{FIXER_PROMPT}\n\n{COMMON_DEVELOPER_INSTRUCTION}"
+        combined_prompt = f"{FIXER_PROMPT}"
         prompt = ChatPromptTemplate.from_messages([
             ("system", combined_prompt),
             ("user", "【BROKEN CODE】:\n{code}\n\n【ERROR MESSAGE】:\n{error}")
@@ -121,9 +134,19 @@ class ArcadeAgentChain:
         return prompt | self.llm | StrOutputParser()
 
     def get_logic_fixer_chain(self):
-        combined_prompt = f"{LOGIC_FIXER_PROMPT}\n\n{COMMON_DEVELOPER_INSTRUCTION}"
+        combined_prompt = f"{LOGIC_FIXER_PROMPT}"
         prompt = ChatPromptTemplate.from_messages([
             ("system", combined_prompt),
             ("user", "【Error Messages】:\n{error}\n\n【CODE】:\n{code}")
+        ])
+        return prompt | self.llm | StrOutputParser()
+
+    def get_fuzzer_chain(self):
+        """
+        [NEW] Generates the Fuzzer Monkey Bot Logic snippet based on the GDD.
+        """
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are a QA Automation Engineer specializing in Python Arcade 2.x."),
+            ("user", FUZZER_GENERATION_PROMPT)
         ])
         return prompt | self.llm | StrOutputParser()

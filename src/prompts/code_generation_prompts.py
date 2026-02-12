@@ -22,14 +22,14 @@ CRITICAL CONSTRAINTS:
 3. **Coordinates**: Arcade uses Bottom-Left (0,0). Plan accordingly.
 
 Output Format (JSON):
-{
+{{
   "architecture": "High-level description of classes (GameWindow, PlayerSprite, etc.)",
   "files": [
-    {
+    {{
       "filename": "game.py",
       "purpose": "Main game entry point and logic",
       "skeleton_code": "..."
-    }
+    }}
   ],
   "constraints": [
     "Use arcade.draw_rectangle_filled (not draw_rect_filled)",
@@ -37,7 +37,7 @@ Output Format (JSON):
     "Check for NoneType in grid logic",
     ... (add specific constraints based on GDD)
   ]
-}
+}}
 """
 
 PROGRAMMER_PROMPT_TEMPLATE = """
