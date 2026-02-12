@@ -31,9 +31,6 @@ def clean_code_content(content: str) -> str:
 
     return content.strip()
 
-
-# src/utils.py
-
 def save_generated_files(file_dict: dict, base_dir: str):
     """
     將檔案字典寫入磁碟，並回傳 game.py 的路徑作為主入口。

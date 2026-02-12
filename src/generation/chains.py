@@ -6,6 +6,7 @@ from typing import List
 from src.generation.model_factory import get_langchain_model
 from src.generation.arcade_tools import ARCADE_LANGCHAIN_TOOLS
 from src.prompts.code_generation_prompts import (
+    ARCHITECT_SYSTEM_PROMPT,
     PROGRAMMER_PROMPT_TEMPLATE,
     COMMON_DEVELOPER_INSTRUCTION,
     PLAN_REVIEW_PROMPT
@@ -47,9 +48,6 @@ class ArcadeAgentChain:
         return prompt | self.llm | StrOutputParser()
 
     def get_reviewer_chain(self):
-        """
-        This was missing and causing the AttributeError.
-        """
         prompt = ChatPromptTemplate.from_messages([
             ("system", CPO_REVIEW_PROMPT),
             ("user", "Current GDD:\n{gdd}\n\nProvide feedback to improve this design.")
@@ -59,15 +57,27 @@ class ArcadeAgentChain:
     # --- Phase 2: Production (Architect & Programmer) ---
     def get_architect_chain(self):
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a Senior Game Architect specializing in Arcade 2.6.x."),
+            ("system", ARCHITECT_SYSTEM_PROMPT),
             ("user", "GDD:\n{gdd}\nAssets:\n{assets}\n\nTask: Plan the game architecture. \n{format_instructions}")
         ])
         return prompt | self.llm | self.json_parser
 
+    def get_architect_refinement_chain(self):
+        """
+        [NEW] Refines the Technical Plan based on Reviewer feedback.
+        Matches the logic: 'Rewrite the Technical Implementation Plan by incorporating the feedback.'
+        """
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", ARCHITECT_SYSTEM_PROMPT),
+            ("user",
+             "Original Plan JSON:\n{original_plan}\n\n"
+             "Reviewer Feedback:\n{feedback}\n\n"
+             "TASK: Refine the architecture JSON to address the feedback.\n"
+             "{format_instructions}")
+        ])
+        return prompt | self.llm | self.json_parser
+
     def get_plan_reviewer_chain(self):
-        """
-        Plan reviewer chain to validate the architecture plan against Arcade 2.x API and Grid safety.
-        """
         prompt = ChatPromptTemplate.from_messages([
             ("system", PLAN_REVIEW_PROMPT),
             ("user", "Architecture Plan:\n{plan}\n\nAnalyze for API correctness and Grid safety.")
@@ -76,7 +86,7 @@ class ArcadeAgentChain:
 
     def get_programmer_chain(self):
         """
-        整合了 PROGRAMMER_PROMPT_TEMPLATE 與 COMMON_DEVELOPER_INSTRUCTION。
+        Generates the code using RAG tools and specific Math Injection.
         """
         llm_with_tools = self.llm.bind_tools(ARCADE_LANGCHAIN_TOOLS)
 
@@ -87,7 +97,8 @@ class ArcadeAgentChain:
             ("user",
              "Architecture Context:\n{architecture_plan}\n\n"
              "Review Feedback:\n{review_feedback}\n\n"
-             "Constraints:\n{constraints}\n\n"
+             "Technical Constraints:\n{constraints}\n\n"
+             "Math & Physics Formulas (MANDATORY):\n{math_context}\n\n"
              "TASK: Implement the FULL game logic in 'game.py'.\n"
              "Output ONLY the code block.")
         ])
@@ -95,8 +106,6 @@ class ArcadeAgentChain:
 
     # --- Phase 3: Testing & Fixing ---
     def get_syntax_fixer_chain(self):
-        """對標 generator-core: 修復 Runtime/Syntax 錯誤"""
-        # 整合 COMMON 指令確保修復時不會又引入 3.0 語法
         combined_prompt = f"{FIXER_PROMPT}\n\n{COMMON_DEVELOPER_INSTRUCTION}"
         prompt = ChatPromptTemplate.from_messages([
             ("system", combined_prompt),
@@ -105,7 +114,6 @@ class ArcadeAgentChain:
         return prompt | self.llm | StrOutputParser()
 
     def get_logic_reviewer_chain(self):
-        """對標 generator-core: 靜態檢查 API 規範與 NoneType 安全"""
         prompt = ChatPromptTemplate.from_messages([
             ("system", LOGIC_REVIEW_PROMPT),
             ("user", "【CODE】:\n{code}")
@@ -113,7 +121,6 @@ class ArcadeAgentChain:
         return prompt | self.llm | StrOutputParser()
 
     def get_logic_fixer_chain(self):
-        """對標 generator-core: 修正 Reviewer 發現的邏輯問題"""
         combined_prompt = f"{LOGIC_FIXER_PROMPT}\n\n{COMMON_DEVELOPER_INSTRUCTION}"
         prompt = ChatPromptTemplate.from_messages([
             ("system", combined_prompt),
