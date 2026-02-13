@@ -131,12 +131,17 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
         }
 
     def evaluator_node(state: GameState):
-        """Replaces the while loop to validate syntax and logic iteratively."""
+        """
+        Validates the code in order of absolute truth:
+        1. Syntax -> 2. Fuzzer (Runtime) -> 3. Static Logic Review
+        """
         log_callback(f"\n[Test] Starting validation round {state['test_iterations'] + 1}...")
         current_code = state["current_code"]
         main_file_path = os.path.join(work_dir, "game.py")
-
-        # Stage A: Syntax Check
+        lines_of_traceback_included = 10
+        # ==========================================
+        # Stage A: Syntax Check (Fastest, catches typos)
+        # ==========================================
         log_callback("[Check] Running static syntax check...")
         try:
             compile(current_code, "game.py", 'exec')
@@ -146,15 +151,9 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
             log_callback("[Check] Syntax error detected.")
             return {"test_errors": [error_msg]}
 
-        # Stage B: Logic Review
-        log_callback("[Review] Running logic and API standard review...")
-        review_result = agents.get_logic_reviewer_chain().invoke({"code": current_code})
-        if "PASS" not in review_result:
-            error_msg = f"[LogicError] {review_result}"
-            log_callback("[Review] Logic error detected.")
-            return {"test_errors": [error_msg]}
-
-        # Stage C: Runtime Test (Fuzzer)
+        # ==========================================
+        # Stage B: Runtime Test (Fuzzer) - THE GROUND TRUTH
+        # ==========================================
         log_callback("[Test] Running fuzzer runtime tests...")
         try:
             root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -164,16 +163,35 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
 
             success, error_msg = run_fuzz_test(main_file_path, duration=30)
             if not success:
-                log_callback("[Test] Runtime error (Fuzzer) detected.")
+                log_callback(f"[Test] Fuzzer Runtime Error: {error_msg}")
+                # Fuzzer errors are routed to the powerful Syntax/Traceback Fixer
                 return {"test_errors": [f"[RuntimeError] {error_msg}"]}
+            else:
+                log_callback("[Test] Fuzzer passed (No crashes for 30s).")
+
         except Exception as e:
+            import traceback
             log_callback(f"[Error] Test runner exception: {str(e)}")
-            # Take only the last 3 lines of the traceback for brevity
-            short_error = traceback.format_exc().strip().split('\n')[-3:]
-            error_msg = f"[Error]: {' '.join(short_error)}"
+            short_error = traceback.format_exc().strip().split('\n')[-lines_of_traceback_included:]
+            error_msg = f"[TestRunnerError]: {' '.join(short_error)}"
             return {"test_errors": [error_msg]}
 
-        log_callback("[Result] Code passed all validations successfully.")
+        # ==========================================
+        # Stage C: Logic Review (Static Analysis)
+        # ==========================================
+        # Only runs if the game actually survives the Fuzzer!
+        log_callback("[Review] Running strict API standard review...")
+        review_result = agents.get_logic_reviewer_chain().invoke({"code": current_code})
+
+        if "PASS" not in review_result:
+            error_msg = f"[LogicError] {review_result}"
+            log_callback(f"[Review] Logic/API Rule Violation: {review_result}")
+            # Logic Errors are routed to the Logic Fixer
+            return {"test_errors": [error_msg]}
+        else:
+            log_callback("[Review] Strict API validation passed.")
+
+        log_callback("[Result] Code passed ALL validations successfully!")
         return {"is_valid": True}
 
     def fixer_node(state: GameState):
