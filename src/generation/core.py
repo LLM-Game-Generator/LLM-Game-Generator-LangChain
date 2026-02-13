@@ -1,6 +1,9 @@
 import os
 import json
 import sys
+from langgraph.graph import StateGraph, START, END
+
+from generation.game_state import GameState
 from src.generation.chains import ArcadeAgentChain
 from src.generation.asset_gen import generate_assets
 from src.utils import clean_code_content, save_generated_files
@@ -11,274 +14,299 @@ from src.prompts.game_logic_cheat_sheet import (
     PLATFORMER_CHEAT_SHEET
 )
 
-
-def run_design_phase(user_input, log_callback=print, provider="openai", model=None):
-    agents = ArcadeAgentChain(provider, model)
-
-    log_callback(f"[Design] CEO Analyzing idea: {user_input}...")
-    ceo_analysis = agents.get_ceo_chain().invoke({"input": user_input})
-
-    feedback = "None"
-    final_gdd = ""
-
-    log_callback("[Design] CPO Drafting GDD...")
-    for i in range(2):
-        final_gdd = agents.get_cpo_chain().invoke({
-            "idea": user_input,
-            "analysis": ceo_analysis,
-            "feedback": feedback
-        })
-        log_callback(f"[Design] Reviewer critiquing round {i + 1}...")
-        feedback = agents.get_reviewer_chain().invoke({"gdd": final_gdd})
-
-    return final_gdd
-
-
-def run_plan_phase(gdd_context, asset_json, log_callback=print, provider="openai", model=None):
+def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir: str, provider_name:str="openai"):
     """
-    Execute Planning Phase with Iterative Review Loop (Core Logic Ported)
-    Plan -> Review -> Refine -> Review -> Refine
+    Creates and returns a compiled LangGraph application.
+    Passes 'agents' and 'log_callback' into the nodes via closure.
     """
-    agents = ArcadeAgentChain(provider, model)
+    # --- Node Definitions ---
+    def ceo_node(state: GameState):
+        log_callback(f"[Design] CEO Analyzing idea: {state['user_input']}...")
+        analysis = agents.get_ceo_chain().invoke({"input": state["user_input"]})
+        return {"ceo_analysis": analysis, "design_iterations": 0, "design_feedback": "None"}
 
-    log_callback("[Architect] Initializing system architecture...")
+    def cpo_node(state: GameState):
+        log_callback(f"[Design] CPO Drafting GDD (Round {state['design_iterations'] + 1})...")
+        gdd = agents.get_cpo_chain().invoke({
+            "idea": state["user_input"],
+            "analysis": state["ceo_analysis"],
+            "feedback": state["design_feedback"]
+        })
+        return {"gdd": gdd}
 
-    # 1. Initial Plan
-    current_plan = agents.get_architect_chain().invoke({
-        "gdd": gdd_context,
-        "assets": asset_json,
-        "format_instructions": agents.json_parser.get_format_instructions()
-    })
+    def design_reviewer_node(state: GameState):
+        log_callback("[Design] Reviewer critiquing GDD...")
+        feedback = agents.get_reviewer_chain().invoke({"gdd": state["gdd"]})
+        return {
+            "design_feedback": feedback,
+            "design_iterations": state["design_iterations"] + 1
+        }
 
-    # 2. Review & Refine Loop (2 Attempts)
-    review_feedback = "None"
+    def asset_node(state: GameState):
+        log_callback("[System] Generating Assets...")
+        assets = generate_assets(gdd_context=state["gdd"], provider=provider_name)
+        return {"assets_json": assets}
 
-    for attempt in range(2):
-        log_callback(f"[Architect] Plan Review Round {attempt + 1}/2...")
+    def architect_node(state: GameState):
+        log_callback(f"[Architect] Planning system architecture (Round {state['plan_iterations'] + 1})...")
 
-        # Convert plan to string for the reviewer
-        plan_str = json.dumps(current_plan, indent=2)
+        if state['plan_iterations'] == 0:
+            plan = agents.get_architect_chain().invoke({
+                "gdd": state["gdd"],
+                "assets": state["assets_json"],
+                "format_instructions": agents.json_parser.get_format_instructions()
+            })
+        else:
+            log_callback("[Architect] Refining plan based on feedback...")
+            plan_str = json.dumps(state["architecture_plan"], indent=2)
+            plan = agents.get_architect_refinement_chain().invoke({
+                "original_plan": plan_str,
+                "feedback": state["plan_feedback"],
+                "format_instructions": agents.json_parser.get_format_instructions()
+            })
+        return {"architecture_plan": plan}
 
-        # Call Reviewer
-        review_feedback = agents.get_plan_reviewer_chain().invoke({"plan": plan_str})
+    def plan_reviewer_node(state: GameState):
+        log_callback("[Architect] Plan Review...")
+        plan_str = json.dumps(state["architecture_plan"], indent=2)
+        feedback = agents.get_plan_reviewer_chain().invoke({"plan": plan_str})
+        return {
+            "plan_feedback": feedback,
+            "plan_iterations": state["plan_iterations"] + 1
+        }
 
-        # Call Refinement Agent
-        log_callback(f"[Architect] Refining plan based on feedback...")
-        current_plan = agents.get_architect_refinement_chain().invoke({
-            "original_plan": plan_str,
-            "feedback": review_feedback,
-            "format_instructions": agents.json_parser.get_format_instructions()
+    def programmer_node(state: GameState):
+        math_injection = ""
+        gdd_lower = state["gdd"].lower()
+        if any(k in gdd_lower for k in ["pool", "billiard", "physics", "ball", "shooter", "tank"]):
+            log_callback("[System] Detected Physics/Top-Down Game. Injecting Vector Math...")
+            math_injection = PHYSICS_MATH_CHEAT_SHEET
+        elif any(k in gdd_lower for k in ["grid", "2048", "tetris", "snake", "puzzle", "board"]):
+            log_callback("[System] Detected Grid-Based Game. Injecting Grid Math...")
+            math_injection = GRID_MATH_CHEAT_SHEET
+        elif any(k in gdd_lower for k in ["jump", "platform", "gravity", "flappy", "mario"]):
+            log_callback("[System] Detected Platformer. Injecting Gravity Logic...")
+            math_injection = PLATFORMER_CHEAT_SHEET
+
+        log_callback("[Programmer] Implementing game.py with RAG & Math Tools...")
+        complexity_constraints = (
+            "1. Write verbose code with detailed comments.\n"
+            "2. Implement at least 3 different enemy types or obstacles if applicable.\n"
+            "3. Include a 'ParticleManager' class for visual effects.\n"
+            "4. ABSOLUTELY NO ABBREVIATED CODE. WRITE EVERY LINE.\n"
+            "5. Implement a proper Game Over view and Restart mechanic."
+        )
+        constraints = "\n".join(state["architecture_plan"].get('constraints', []))
+        full_constraints = f"{constraints}\n\n{complexity_constraints}"
+
+        response = agents.get_programmer_chain().invoke({
+            "architecture_plan": state["architecture_plan"],
+            "review_feedback": state["plan_feedback"],
+            "constraints": full_constraints,
+            "math_context": math_injection
         })
 
-    log_callback("[Architect] Final Architecture Locked.")
-    return current_plan, review_feedback
+        content = response.content if hasattr(response, 'content') else str(response)
+        cleaned_code = clean_code_content(content)
 
+        # Generate Fuzzer Logic
+        log_callback("[Test] Generating Fuzzer logic snippet...")
+        fuzzer_response = agents.get_fuzzer_chain().invoke({"gdd": state["gdd"]})
+        fuzzer_logic = fuzzer_response.content if hasattr(fuzzer_response, 'content') else str(fuzzer_response)
+        cleaned_fuzzer_logic = clean_code_content(fuzzer_logic)
 
-def run_production_pipeline(gdd_context, asset_json, log_callback=print, provider="openai", model=None):
-    agents = ArcadeAgentChain(provider, model)
+        project_files = {"game.py": cleaned_code, "fuzz_logic.py": cleaned_fuzzer_logic}
 
-    # 1. Plan Phase with Loop
-    plan, review_feedback = run_plan_phase(gdd_context, asset_json, log_callback, provider, model)
+        # Save files to disk for testing
+        save_generated_files(project_files, work_dir)
 
-    # 2. Logic Injection (Based on Game Type)
-    math_injection = ""
-    gdd_lower = gdd_context.lower()
+        return {
+            "current_code": cleaned_code,
+            "project_files": project_files,
+            "test_iterations": 0,
+            "test_errors": [],
+            "is_valid": False
+        }
 
-    if any(k in gdd_lower for k in ["pool", "billiard", "physics", "ball", "shooter", "tank"]):
-        log_callback("💡 Detected Physics/Top-Down Game. Injecting Vector Math...")
-        math_injection = PHYSICS_MATH_CHEAT_SHEET
-    elif any(k in gdd_lower for k in ["grid", "2048", "tetris", "snake", "puzzle", "board"]):
-        log_callback("💡 Detected Grid-Based Game. Injecting Grid Math...")
-        math_injection = GRID_MATH_CHEAT_SHEET
-    elif any(k in gdd_lower for k in ["jump", "platform", "gravity", "flappy", "mario"]):
-        log_callback("💡 Detected Platformer. Injecting Gravity Logic...")
-        math_injection = PLATFORMER_CHEAT_SHEET
+    def evaluator_node(state: GameState):
+        """Replaces the while loop to validate syntax and logic iteratively."""
+        log_callback(f"\n[Test] Starting validation round {state['test_iterations'] + 1}...")
+        current_code = state["current_code"]
+        main_file_path = os.path.join(work_dir, "game.py")
 
-    # 3. Programmer Phase
-    log_callback("[Programmer] Implementing game.py with RAG & Math Tools...")
-
-    complexity_constraints = (
-        "1. Write verbose code with detailed comments.\n"
-        "2. Implement at least 3 different enemy types or obstacles if applicable.\n"
-        "3. Include a 'ParticleManager' class for visual effects.\n"
-        "4. ABSOLUTELY NO ABBREVIATED CODE. WRITE EVERY LINE.\n"
-        "5. Implement a proper Game Over view and Restart mechanic."
-    )
-
-    constraints = "\n".join(plan.get('constraints', []))
-    full_constraints = f"{constraints}\n\n{complexity_constraints}"
-
-    response = agents.get_programmer_chain().invoke({
-        "architecture_plan": plan.get('architecture', ''),
-        "review_feedback": review_feedback,
-        "constraints": full_constraints,
-        "math_context": math_injection
-    })
-
-    content = response.content if hasattr(response, 'content') else str(response)
-    cleaned_code = clean_code_content(content)
-
-    return {"game.py": cleaned_code}
-
-
-def run_test_and_fix_phase(project_files, work_dir, log_callback=print, provider="openai", model=None, gdd: str = None):
-    agents = ArcadeAgentChain(provider, model)
-
-    if not os.path.exists(work_dir):
-        os.makedirs(work_dir)
-
-    main_filename = "game.py"
-    main_file_path = os.path.join(work_dir, main_filename)
-
-    save_generated_files(project_files, work_dir)
-
-    if main_filename not in project_files:
-        log_callback(f"[Test] {main_filename} not found. Skipping tests.")
-        return project_files
-
-    # --- 0. Generate Fuzzer Logic ---
-    log_callback("[Test] Generating Fuzzer logic snippet...")
-
-    fuzzer_response = agents.get_fuzzer_chain().invoke({"gdd": gdd})
-    fuzzer_logic = fuzzer_response.content if hasattr(fuzzer_response, 'content') else str(fuzzer_response)
-
-    cleaned_fuzzer_logic = clean_code_content(fuzzer_logic)
-    fuzzer_file_path = os.path.join(work_dir, "fuzz_logic.py")
-    with open(fuzzer_file_path, "w", encoding="utf-8") as f:
-        f.write(cleaned_fuzzer_logic)
-    project_files["fuzz_logic.py"] = cleaned_fuzzer_logic
-
-    # --- 1. Runtime Fuzzing Loop ---
-    max_retries = 5
-    is_valid = False
-
-    while (not is_valid) and (max_retries > 0):
-        current_code = project_files.get(main_filename, "")
-        log_callback(f"\n[Test] 開始新一輪驗證 (剩餘嘗試次數: {max_retries})")
-
-        # --- 階段 A: 語法檢查 (Syntax Check) ---
-        log_callback("[Check] 執行靜態語法檢查...")
+        # Stage A: Syntax Check
+        log_callback("[Check] Running static syntax check...")
         try:
-            compile(current_code, main_filename, 'exec')
-            log_callback("✅ 語法正確")
+            compile(current_code, "game.py", 'exec')
+            log_callback("[Check] Syntax validation passed.")
         except SyntaxError as e:
-            error_msg = f"Line {e.lineno}: {e.msg}\n{e.text}"
-            log_callback(f"❌ 語法錯誤: {error_msg} (嘗試修復中...)")
+            error_msg = f"[SyntaxError] Line {e.lineno}: {e.msg}\n{e.text}"
+            log_callback("[Check] Syntax error detected.")
+            return {"test_errors": [error_msg]}
 
-            syntax_fixed_response = agents.get_syntax_fixer_chain().invoke({
-                "code": current_code,
-                "error": error_msg
-            })
-
-            updated_code = clean_code_content(syntax_fixed_response)
-            project_files[main_filename] = updated_code
-            with open(main_file_path, "w", encoding="utf-8") as f:
-                f.write(updated_code)
-
-            max_retries -= 1
-            log_callback("[Fixer] 語法已修復，重新開始驗證流程。")
-            continue
-
-        # --- 階段 B: 邏輯檢查 (Logic Review) ---
-        log_callback("[Review] 執行邏輯與 API 標準檢查...")
+        # Stage B: Logic Review
+        log_callback("[Review] Running logic and API standard review...")
         review_result = agents.get_logic_reviewer_chain().invoke({"code": current_code})
-
         if "PASS" not in review_result:
-            log_callback(f"❌ 邏輯錯誤: {review_result} (嘗試修復中...)")
+            error_msg = f"[LogicError] {review_result}"
+            log_callback("[Review] Logic error detected.")
+            return {"test_errors": [error_msg]}
 
-            logic_fixed_response = agents.get_logic_fixer_chain().invoke({
-                "code": current_code,
-                "error": review_result,
-                "gdd": gdd
-            })
-
-            updated_code = clean_code_content(logic_fixed_response)
-            project_files[main_filename] = updated_code
-            with open(main_file_path, "w", encoding="utf-8") as f:
-                f.write(updated_code)
-
-            max_retries -= 1
-            log_callback("[Fixer] 邏輯已修復，重新開始驗證流程。")
-            continue
-
-        log_callback("✅ 邏輯正確")
-
-        # --- 階段 C: 運行時測試 (Fuzzer Test) ---
-        log_callback("[Test] 執行 Fuzzer 運行測試...")
-
+        # Stage C: Runtime Test (Fuzzer)
+        log_callback("[Test] Running fuzzer runtime tests...")
         try:
             root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
             if root_dir not in sys.path:
                 sys.path.append(root_dir)
             from src.testing.runner import run_fuzz_test
 
-            # 這裡的 duration 可以根據 config 調整
             success, error_msg = run_fuzz_test(main_file_path, duration=30)
+            if not success:
+                log_callback("[Test] Runtime error (Fuzzer) detected.")
+                return {"test_errors": [f"[RuntimeError] {error_msg}"]}
         except Exception as e:
-            log_callback(f"[Error] 測試執行器異常: {str(e)}")
-            break
+            log_callback(f"[Error] Test runner exception: {str(e)}")
+            return {"test_errors": [f"[TestRunnerError] {str(e)}"]}
 
-        if not success:
-            log_callback(f"❌ 運行時錯誤 (Fuzzer): {error_msg} (嘗試修復中...)")
+        log_callback("[Result] Code passed all validations successfully.")
+        return {"is_valid": True}
 
-            # 運行時崩潰通常也由語法修復鏈處理，或您可以定義專門的 runtime fixer
-            fixed_response = agents.get_syntax_fixer_chain().invoke({
-                "code": current_code,
-                "error": error_msg
+    def fixer_node(state: GameState):
+        """Memory Core: Fixes code based on historical error logs."""
+        log_callback("[Fixer] Reading historical error logs and attempting fix...")
+        latest_error = state["test_errors"][-1]
+
+        # Concatenate history to prevent the agent from repeating mistakes
+        history_errors = state["test_errors"][:-1]
+        error_prompt = latest_error
+        if history_errors:
+            history_str = "\n".join(history_errors)
+            error_prompt = f"[Past Failed Attempts (Do NOT repeat these mistakes)]:\n{history_str}\n\n[Latest Error]:\n{latest_error}"
+
+        # Route to appropriate fixer chain based on error type
+        if "[LogicError]" in latest_error:
+            response = agents.get_logic_fixer_chain().invoke({
+                "code": state["current_code"],
+                "error": error_prompt,
+                "gdd": state["gdd"]
+            })
+        else:
+            response = agents.get_syntax_fixer_chain().invoke({
+                "code": state["current_code"],
+                "error": error_prompt
             })
 
-            updated_code = clean_code_content(fixed_response)
-            project_files[main_filename] = updated_code
-            with open(main_file_path, "w", encoding="utf-8") as f:
-                f.write(updated_code)
+        updated_code = clean_code_content(response)
 
-            max_retries -= 1
-            log_callback("[Fixer] 運行錯誤已修復，重新開始驗證流程。")
-            continue
+        # Update file on disk for the next Fuzzer run
+        with open(os.path.join(work_dir, "game.py"), "w", encoding="utf-8") as f:
+            f.write(updated_code)
 
-        log_callback("✅ 運行功能正確")
+        # Update project files in state
+        new_project_files = state["project_files"]
+        new_project_files["game.py"] = updated_code
 
-        # 通過所有關卡
-        is_valid = True
+        return {
+            "current_code": updated_code,
+            "project_files": new_project_files,
+            "test_iterations": state["test_iterations"] + 1
+        }
 
-    # --- 2. 結束處理 ---
-    if is_valid:
-        log_callback("[Result] RESULT_SUCCESS: 程式碼通過所有驗證！")
-    else:
-        log_callback("[Result] RESULT_FAIL: 已達最大重試次數，驗證失敗。")
+    # --- Edge Conditional Functions ---
 
-    return project_files
+    def check_design_loop(state: GameState):
+        return "continue_to_asset" if state["design_iterations"] >= 2 else "back_to_cpo"
+
+    def check_plan_loop(state: GameState):
+        return "continue_to_programmer" if state["plan_iterations"] >= 2 else "back_to_architect"
+
+    def check_test_loop(state: GameState):
+        if state["is_valid"]:
+            return "success"
+        if state["test_iterations"] >= 5:
+            log_callback("[Warning] Max retries (5) reached, forcing termination of validation.")
+            return "failure"
+        return "go_to_fixer"
+
+    # --- Assemble StateGraph ---
+    workflow = StateGraph(GameState)
+
+    # Add nodes
+    workflow.add_node("CEO", ceo_node)
+    workflow.add_node("CPO", cpo_node)
+    workflow.add_node("Design_Reviewer", design_reviewer_node)
+    workflow.add_node("Asset_Gen", asset_node)
+    workflow.add_node("Architect", architect_node)
+    workflow.add_node("Plan_Reviewer", plan_reviewer_node)
+    workflow.add_node("Programmer", programmer_node)
+    workflow.add_node("Evaluator", evaluator_node)
+    workflow.add_node("Fixer", fixer_node)
+
+    # Set edges
+    workflow.add_edge(START, "CEO")
+    workflow.add_edge("CEO", "CPO")
+    workflow.add_edge("CPO", "Design_Reviewer")
+
+    # Design Loop
+    workflow.add_conditional_edges("Design_Reviewer", check_design_loop, {
+        "back_to_cpo": "CPO",
+        "continue_to_asset": "Asset_Gen"
+    })
+
+    workflow.add_edge("Asset_Gen", "Architect")
+    workflow.add_edge("Architect", "Plan_Reviewer")
+
+    # Plan Loop
+    workflow.add_conditional_edges("Plan_Reviewer", check_plan_loop, {
+        "back_to_architect": "Architect",
+        "continue_to_programmer": "Programmer"
+    })
+
+    workflow.add_edge("Programmer", "Evaluator")
+
+    # Test & Fix Loop
+    workflow.add_conditional_edges("Evaluator", check_test_loop, {
+        "success": END,
+        "failure": END,
+        "go_to_fixer": "Fixer"
+    })
+
+    workflow.add_edge("Fixer", "Evaluator")
+
+    return workflow.compile()
 
 def run_full_generator_pipeline(user_input, log_callback=print, provider="openai"):
-    # 1. Design Phase
-    gdd = run_design_phase(
-        user_input=user_input,
-        log_callback=log_callback,
-        provider=provider
-    )
-
-    # 2. Asset Phase
-    log_callback("[System] Generating Assets...")
-    assets = generate_assets(gdd_context=gdd, provider=provider)
-
-    # 3. Production Phase (Now includes Iterative Planning & Math Injection)
-    project_files = run_production_pipeline(
-        gdd_context=gdd,
-        asset_json=assets,
-        log_callback=log_callback,
-        provider=provider
-    )
-
-    # 4. Test & Fix Phase
-    log_callback("[System] Starting Test & Fix Loop...")
+    """
+    Executes the full LangGraph pipeline automatically.
+    """
+    agents = ArcadeAgentChain(provider, model=None)
     output_path = os.path.join(config.OUTPUT_DIR, "generated_game")
-    project_files = run_test_and_fix_phase(
-        project_files=project_files,
-        work_dir=output_path,
-        log_callback=log_callback,
-        provider=provider,
-        model=None,
-        gdd=gdd
-    )
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
 
-    return project_files
+    # 1. Initialize graph
+    app_graph = create_game_generator_graph(agents, log_callback, output_path, provider_name=provider)
+
+    # 2. Prepare initial State
+    initial_state = {
+        "user_input": user_input,
+        "design_iterations": 0,
+        "plan_iterations": 0,
+        "test_iterations": 0,
+        "test_errors": [],
+        "project_files": {},
+        "is_valid": False,
+        "work_dir": output_path
+    }
+
+    # 3. Execute graph
+    log_callback("[System] Starting LangGraph Multi-Agent Pipeline...")
+    final_state = app_graph.invoke(initial_state)
+
+    if final_state["is_valid"]:
+        log_callback("[Result] RESULT_SUCCESS: Code passed all validation checks.")
+    else:
+        log_callback("[Result] RESULT_FAIL: Validation failed. Please review generated files.")
+
+    # Return the final project files dictionary for app.py to process
+    return final_state["project_files"]

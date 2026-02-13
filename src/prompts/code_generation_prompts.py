@@ -8,7 +8,9 @@ Example Output:
 {{
   "background_color": [0, 0, 0],
   "player": {{ "shape": "rect", "color": [0, 255, 0], "size": [30, 30] }},
-  "enemy": {{ "shape": "circle", "color": [255, 0, 0], "size": [20, 20] }}
+  "enemy": {{ "shape": "circle", "color": [255, 0, 0], "size": [20, 20] }},
+  "collectible": {{ "shape": "rect", "color": [255, 255, 0], "size": [15, 15] }},
+  ...
 }}
 """
 
@@ -39,125 +41,174 @@ Output Format (JSON):
   ]
 }}
 """
-
 PROGRAMMER_PROMPT_TEMPLATE = """
 You are an expert Python Arcade 2.6.x Developer.
-Task: Write the complete 'main.py' based on the Design and Assets.
+Task: Write the complete 'game.py' based on the Design and Assets.
+
+【OFFICIAL ARCADE 2.6.17 DOCUMENTATION & EXAMPLES】:
+{{context}}
 
 【CRITICAL RULES for ARCADE 2.x】:
 1. **Architecture**: 
-   - Must use `class GameWindow(arcade.Window)`.
-   - Use `setup()` for initialization/reset and `on_draw()` for rendering.
-   - Use `arcade.run()` at the end.
-
+   - Must use `arcade.View` for screen management (InstructionView, GameView, GameOverView).
+   - The `GameWindow` simply loads the first view.
 2. **Standard Drawing API**:
    - **REQUIRED**: Use legacy drawing functions:
      - `arcade.draw_rectangle_filled(center_x, center_y, width, height, color)`
-     - `arcade.draw_circle_filled(center_x, center_y, radius, color)`
-     - `arcade.draw_line(start_x, start_y, end_x, end_y, color, line_width)`
+     - `arcade.draw_text(text, start_x, start_y, color, font_size)`
    - **Colors**: Use `arcade.color.COLOR_NAME` or `(r, g, b)` tuples.
-
 3. **Asset Management (Procedural)**:
-   - Do NOT load external files. 
-   - **PIL Integration**: Create textures using `PIL.Image`.
+   - Do NOT load external files. Use `PIL` to create textures procedurally.
    - **Texture Constructor**: `arcade.Texture(name_string, image_object)`. 
-     - *Crucial*: Each texture needs a unique name (e.g., f"sprite_{{id(self)}}").
 
-4. **Sprite & Physics**:
-   - Inherit from `arcade.Sprite`.
-   - **Update Logic**: Use `on_update(self, delta_time)` in the Window class.
-   - **Sprite Update**: `self.sprite_list.update()` usually calls the `update()` method of each sprite.
-     - Your Sprite's `update` method does NOT need `delta_time` unless you pass it manually.
+【CODE STRUCTURE TEMPLATE (MANDATORY)】:
+You MUST use this exact structure. Do NOT change the View classes, only fill in the `MyGame` logic.
 
-5. **Physics Strategy**:
-   - **Simple**: `self.physics_engine = arcade.PhysicsEngineSimple(player, walls)`.
-   - **Complex**: `import pymunk`. 
-     - Manually update `sprite.center_x/y` and `sprite.angle` (in degrees) from Pymunk body in each frame.
-
-6. **Game States**:
-   - Implement "START", "PLAYING", "GAME_OVER" states using a `self.state` variable.
-   - **Mandatory**: Calling `arcade.start_render()` at the beginning of `on_draw()`.
-7. **GUI**:
-    - Make sure the gui will reflect to user's input.
-8. **Input Handling**:
-   - Implement `on_key_press`, `on_mouse_press`, `on_mouse_drag`, `on_mouse_release`.
-
-【CODE STRUCTURE TEMPLATE】:
 ```python
 import arcade
 import random
 import math
+import time
 import pymunk 
 from PIL import Image, ImageDraw
 
-# Config
+# --- Constants ---
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
-SCREEN_TITLE = "Arcade 2.6 Game"
+SCREEN_TITLE = "Generated Game"
 
-# State Constants
-STATE_START = 0
-STATE_PLAYING = 1
-STATE_GAME_OVER = 2
+# --- UI Colors ---
+UI_BG_COLOR = arcade.color.DARK_BLUE_GRAY
+UI_TEXT_COLOR = arcade.color.WHITE
 
-class GameSprite(arcade.Sprite):
-    def __init__(self, color, size, x, y, shape="rect"):
-        super().__init__()
-        # Generate Texture (Arcade 2.x style)
-        img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
-        if shape == "rect":
-            draw.rectangle((0, 0, size, size), fill=color)
-        else:
-            draw.ellipse((0, 0, size, size), fill=color)
+# --- Helper Functions (Asset Generation) ---
+def create_texture(name, size, color, shape="rect"):
+    img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    if shape == "rect":
+        draw.rectangle((0, 0, size, size), fill=color)
+    elif shape == "circle":
+        draw.ellipse((0, 0, size, size), fill=color)
+    return arcade.Texture(f"{{name}}_{{random.randint(0, 10000)}}", img)
 
-        # 2.x Texture needs a unique name
-        self.texture = arcade.Texture(f"tex_{{random.random()}}", img)
-        self.center_x = x
-        self.center_y = y
-        self.body = None 
+# --- Views ---
 
-    def update(self):
-        if self.body:
-            self.center_x = self.body.position.x
-            self.center_y = self.body.position.y
-            self.angle = math.degrees(self.body.angle)
-
-class GameWindow(arcade.Window):
-    def __init__(self):
-        super().__init__(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TITLE)
-        arcade.set_background_color(arcade.color.BLACK)
-        self.state = STATE_START
-        self.all_sprites = arcade.SpriteList()
-        self.space = None 
-
-    def setup(self):
-        self.state = STATE_START
-        self.all_sprites = arcade.SpriteList()
-        # Physics and Sprite initialization...
+class InstructionView(arcade.View):
+    def on_show(self):
+        arcade.set_background_color(UI_BG_COLOR)
 
     def on_draw(self):
-        arcade.start_render() # 2.x MANDATORY
+        arcade.start_render()
+        arcade.draw_text("GAME TITLE", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 50,
+                         arcade.color.WHITE, font_size=50, anchor_x="center")
+        arcade.draw_text("Click to Start", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 30,
+                         arcade.color.GRAY, font_size=20, anchor_x="center")
 
-        if self.state == STATE_START:
-            arcade.draw_text("TITLE", SCREEN_WIDTH/2, SCREEN_HEIGHT/2, arcade.color.WHITE, 30, anchor_x="center")
-        elif self.state == STATE_PLAYING:
-            self.all_sprites.draw()
-        elif self.state == STATE_GAME_OVER:
-            arcade.draw_text("GAME OVER", SCREEN_WIDTH/2, SCREEN_HEIGHT/2, arcade.color.RED, 30, anchor_x="center")
+    def on_mouse_press(self, _x, _y, _button, _modifiers):
+        game_view = MyGame()
+        game_view.setup()
+        self.window.show_view(game_view)
+
+class GameOverView(arcade.View):
+    def __init__(self, score, elapsed_time):
+        super().__init__()
+        self.score = score
+        self.elapsed_time = elapsed_time
+
+    def on_show(self):
+        arcade.set_background_color(arcade.color.BLACK)
+
+    def on_draw(self):
+        arcade.start_render()
+        arcade.draw_text("GAME OVER", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 50,
+                         arcade.color.RED, font_size=50, anchor_x="center")
+        arcade.draw_text(f"Score: {{self.score}}", SCREEN_WIDTH/2, SCREEN_HEIGHT/2,
+                         arcade.color.WHITE, font_size=20, anchor_x="center")
+        arcade.draw_text(f"Time: {{self.elapsed_time:.1f}}s", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 30,
+                         arcade.color.WHITE, font_size=20, anchor_x="center")
+        arcade.draw_text("Click to Restart", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 80,
+                         arcade.color.GRAY, font_size=20, anchor_x="center")
+
+    def on_mouse_press(self, _x, _y, _button, _modifiers):
+        start_view = InstructionView()
+        self.window.show_view(start_view)
+
+class MyGame(arcade.View):
+    def __init__(self):
+        super().__init__()
+        # Game Variables
+        self.score = 0
+        self.start_time = 0
+        self.elapsed_time = 0
+        self.game_over = False
+
+        # Lists
+        self.player_list = arcade.SpriteList()
+        self.enemy_list = arcade.SpriteList()
+        # TODO: Add your sprite lists here
+
+        self.player = None
+
+    def setup(self):
+        self.score = 0
+        self.start_time = time.time()
+        self.game_over = False
+
+        # Clear lists
+        self.player_list = arcade.SpriteList()
+        self.enemy_list = arcade.SpriteList()
+
+        # TODO: Initialize Player and Sprites here
+        # Example:
+        # tex = create_texture("player", 32, (0, 255, 0))
+        # self.player = arcade.Sprite()
+        # self.player.texture = tex
+        # self.player.center_x = SCREEN_WIDTH // 2
+        # self.player.center_y = SCREEN_HEIGHT // 2
+        # self.player_list.append(self.player)
+
+    def on_draw(self):
+        arcade.start_render()
+
+        # TODO: Draw your game objects
+        self.player_list.draw()
+        self.enemy_list.draw()
+
+        # --- HUD (Heads Up Display) ---
+        # Score
+        arcade.draw_text(f"Score: {{self.score}}", 10, SCREEN_HEIGHT - 30, arcade.color.WHITE, 14)
+        # Timer
+        current_time = time.time() - self.start_time
+        arcade.draw_text(f"Time: {{current_time:.1f}}", SCREEN_WIDTH - 100, SCREEN_HEIGHT - 30, arcade.color.WHITE, 14)
 
     def on_update(self, delta_time):
-        if self.state == STATE_PLAYING:
-            if self.space: self.space.step(1/60)
-            self.all_sprites.update() 
+        if self.game_over:
+            return
+
+        self.elapsed_time = time.time() - self.start_time
+
+        # TODO: Update game logic
+        self.player_list.update()
+        self.enemy_list.update()
+
+        # Check for Game Over condition
+        # if self.player.collides_with_list(self.enemy_list):
+        #     self.game_over = True
+        #     view = GameOverView(self.score, self.elapsed_time)
+        #     self.window.show_view(view)
+
+    def on_key_press(self, key, modifiers):
+        # TODO: Handle Input
+        pass
 
     def on_mouse_press(self, x, y, button, modifiers):
-        if self.state == STATE_START: self.state = STATE_PLAYING
-        elif self.state == STATE_GAME_OVER: self.setup()
+        # TODO: Handle Input
+        pass
 
 def main():
-    window = GameWindow()
-    window.setup()
+    window = arcade.Window(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TITLE)
+    start_view = InstructionView()
+    window.show_view(start_view)
     arcade.run()
 
 if __name__ == "__main__":

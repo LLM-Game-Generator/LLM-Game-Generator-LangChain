@@ -11,6 +11,14 @@ def generate_assets(
 ) -> str:
     """
     Generate the art assets for this specific game using LangChain factory.
+    :return: A JSON string containing the generated assets, which may include:
+    {
+      "background_color": [0, 0, 0],
+      "player": { "shape": "rect", "color": [0, 255, 0], "size": [30, 30] },
+      "enemy": { "shape": "circle", "color": [255, 0, 0], "size": [20, 20] },
+      "collectible": { "shape": "rect", "color": [255, 255, 0], "size": [15, 15] },
+      ...
+    }
     """
     # Use the unified factory to get the correct model for the provider
     llm = get_langchain_model(provider=provider, temperature=0.5)

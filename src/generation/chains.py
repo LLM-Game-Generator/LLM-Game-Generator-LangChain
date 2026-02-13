@@ -8,7 +8,6 @@ from src.generation.arcade_tools import ARCADE_LANGCHAIN_TOOLS
 from src.prompts.code_generation_prompts import (
     ARCHITECT_SYSTEM_PROMPT,
     PROGRAMMER_PROMPT_TEMPLATE,
-    COMMON_DEVELOPER_INSTRUCTION,
     PLAN_REVIEW_PROMPT,
     FUZZER_GENERATION_PROMPT
 )
@@ -51,7 +50,9 @@ class ArcadeAgentChain:
     def get_reviewer_chain(self):
         prompt = ChatPromptTemplate.from_messages([
             ("system", CPO_REVIEW_PROMPT),
-            ("user", "Current GDD:\n{gdd}\n\nProvide feedback to improve this design.")
+            ("user", "Current GDD:\n{gdd}\n\n"
+                     "Provide feedback to improve this design."
+            )
         ])
         return prompt | self.llm | StrOutputParser()
 
@@ -59,7 +60,11 @@ class ArcadeAgentChain:
     def get_architect_chain(self):
         prompt = ChatPromptTemplate.from_messages([
             ("system", ARCHITECT_SYSTEM_PROMPT),
-            ("user", "GDD:\n{gdd}\nAssets:\n{assets}\n\nTask: Plan the game architecture. \n{format_instructions}")
+            ("user", "GDD:\n{gdd}\n"
+                     "Assets:\n{assets}\n\n"
+                     "Task: Plan the game architecture. \n"
+                     "{format_instructions}"
+            )
         ])
         return prompt | self.llm | self.json_parser
 
@@ -81,7 +86,9 @@ class ArcadeAgentChain:
     def get_plan_reviewer_chain(self):
         prompt = ChatPromptTemplate.from_messages([
             ("system", PLAN_REVIEW_PROMPT),
-            ("user", "Architecture Plan:\n{plan}\n\nAnalyze for API correctness and Grid safety.")
+            ("user", "Architecture Plan:\n{plan}\n\n"
+                     "Analyze for API correctness and Grid safety."
+            )
         ])
         return prompt | self.llm | StrOutputParser()
 
@@ -115,7 +122,7 @@ class ArcadeAgentChain:
              "TASK: Implement the FULL game logic in 'game.py'.\n"
              "Output ONLY the code block.")
         ])
-        return prompt
+        return prompt | llm_with_tools
 
     # --- Phase 3: Testing & Fixing ---
     def get_syntax_fixer_chain(self):
