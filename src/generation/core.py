@@ -1,6 +1,8 @@
 import os
 import json
 import sys
+import traceback
+
 from langgraph.graph import StateGraph, START, END
 
 from generation.game_state import GameState
@@ -166,7 +168,10 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
                 return {"test_errors": [f"[RuntimeError] {error_msg}"]}
         except Exception as e:
             log_callback(f"[Error] Test runner exception: {str(e)}")
-            return {"test_errors": [f"[TestRunnerError] {str(e)}"]}
+            # Take only the last 3 lines of the traceback for brevity
+            short_error = traceback.format_exc().strip().split('\n')[-3:]
+            error_msg = f"[Error]: {' '.join(short_error)}"
+            return {"test_errors": [error_msg]}
 
         log_callback("[Result] Code passed all validations successfully.")
         return {"is_valid": True}

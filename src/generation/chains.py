@@ -1,3 +1,4 @@
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from pydantic import BaseModel, Field
@@ -35,21 +36,21 @@ class ArcadeAgentChain:
     # --- Phase 1: Design (CEO/CPO) ---
     def get_ceo_chain(self):
         prompt = ChatPromptTemplate.from_messages([
-            ("system", CEO_PROMPT),
+            SystemMessage(content=CEO_PROMPT),
             ("user", "User Idea: {input}\n\nProvide a high-level analysis.")
         ])
         return prompt | self.llm | StrOutputParser()
 
     def get_cpo_chain(self):
         prompt = ChatPromptTemplate.from_messages([
-            ("system", CPO_PROMPT),
+            SystemMessage(content=CPO_PROMPT),
             ("user", "User Idea: {idea}\nCEO Analysis: {analysis}\nFeedback: {feedback}")
         ])
         return prompt | self.llm | StrOutputParser()
 
     def get_reviewer_chain(self):
         prompt = ChatPromptTemplate.from_messages([
-            ("system", CPO_REVIEW_PROMPT),
+            SystemMessage(content=CPO_REVIEW_PROMPT),
             ("user", "Current GDD:\n{gdd}\n\n"
                      "Provide feedback to improve this design."
             )
@@ -59,7 +60,7 @@ class ArcadeAgentChain:
     # --- Phase 2: Production (Architect & Programmer) ---
     def get_architect_chain(self):
         prompt = ChatPromptTemplate.from_messages([
-            ("system", ARCHITECT_SYSTEM_PROMPT),
+            SystemMessage(content=ARCHITECT_SYSTEM_PROMPT),
             ("user", "GDD:\n{gdd}\n"
                      "Assets:\n{assets}\n\n"
                      "Task: Plan the game architecture. \n"
@@ -74,7 +75,7 @@ class ArcadeAgentChain:
         Matches the logic: 'Rewrite the Technical Implementation Plan by incorporating the feedback.'
         """
         prompt = ChatPromptTemplate.from_messages([
-            ("system", ARCHITECT_SYSTEM_PROMPT),
+            SystemMessage(content=ARCHITECT_SYSTEM_PROMPT),
             ("user",
              "Original Plan JSON:\n{original_plan}\n\n"
              "Reviewer Feedback:\n{feedback}\n\n"
@@ -85,7 +86,7 @@ class ArcadeAgentChain:
 
     def get_plan_reviewer_chain(self):
         prompt = ChatPromptTemplate.from_messages([
-            ("system", PLAN_REVIEW_PROMPT),
+            SystemMessage(content=PLAN_REVIEW_PROMPT),
             ("user", "Architecture Plan:\n{plan}\n\n"
                      "Analyze for API correctness and Grid safety."
             )
@@ -112,7 +113,7 @@ class ArcadeAgentChain:
     """
 
         prompt = ChatPromptTemplate.from_messages([
-            ("system", combined_system),
+            SystemMessage(content=combined_system),
             ("user",
              "Architecture Context:\n{architecture_plan}\n\n"
              "Review Feedback:\n{review_feedback}\n\n"
@@ -122,20 +123,20 @@ class ArcadeAgentChain:
              "TASK: Implement the FULL game logic in 'game.py'.\n"
              "Output ONLY the code block.")
         ])
-        return prompt | llm_with_tools
+        return prompt | self.llm | StrOutputParser()
 
     # --- Phase 3: Testing & Fixing ---
     def get_syntax_fixer_chain(self):
         combined_prompt = f"{FIXER_PROMPT}"
         prompt = ChatPromptTemplate.from_messages([
-            ("system", combined_prompt),
+            SystemMessage(content=combined_prompt),
             ("user", "【BROKEN CODE】:\n{code}\n\n【ERROR MESSAGE】:\n{error}")
         ])
         return prompt | self.llm | StrOutputParser()
 
     def get_logic_reviewer_chain(self):
         prompt = ChatPromptTemplate.from_messages([
-            ("system", LOGIC_REVIEW_PROMPT),
+            SystemMessage(content=LOGIC_FIXER_PROMPT),
             ("user", "【CODE】:\n{code}")
         ])
         return prompt | self.llm | StrOutputParser()
@@ -143,7 +144,7 @@ class ArcadeAgentChain:
     def get_logic_fixer_chain(self):
         combined_prompt = f"{LOGIC_FIXER_PROMPT}"
         prompt = ChatPromptTemplate.from_messages([
-            ("system", combined_prompt),
+            SystemMessage(content=combined_prompt),
             ("user", "【Error Messages】:\n{error}\n\n【CODE】:\n{code}")
         ])
         return prompt | self.llm | StrOutputParser()
@@ -153,7 +154,7 @@ class ArcadeAgentChain:
         [NEW] Generates the Fuzzer Monkey Bot Logic snippet based on the GDD.
         """
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a QA Automation Engineer specializing in Python Arcade 2.x."),
+            SystemMessage(content="You are a QA Automation Engineer specializing in Python Arcade 2.x."),
             ("user", FUZZER_GENERATION_PROMPT)
         ])
         return prompt | self.llm | StrOutputParser()

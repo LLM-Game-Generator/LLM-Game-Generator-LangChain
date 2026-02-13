@@ -1,4 +1,6 @@
 import re
+
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from src.generation.model_factory import get_langchain_model
@@ -24,7 +26,7 @@ def generate_assets(
     llm = get_langchain_model(provider=provider, temperature=0.5)
 
     prompt = ChatPromptTemplate.from_messages([
-        ("system", ART_PROMPT),
+        SystemMessage(content=ART_PROMPT),
         ("user", "GDD Content:\n{gdd}")
     ])
 
