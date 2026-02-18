@@ -331,5 +331,12 @@ def run_full_generator_pipeline(user_input, log_callback=print, provider="openai
     else:
         log_callback("[Result] RESULT_FAIL: Validation failed. Please review generated files.")
 
+    # try:
+    #     img = app_graph.get_graph().draw_mermaid_png()
+    #     with open("graph.png", "wb") as f:
+    #         f.write(img)
+    # except Exception as e:
+    #     log_callback(f"[Graph Visualization Error] Could not generate graph image: {str(e)}")
+
     # Return the final project files dictionary for app.py to process
     return final_state["project_files"]

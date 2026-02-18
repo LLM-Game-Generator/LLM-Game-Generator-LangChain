@@ -15,18 +15,9 @@ from src.prompts.code_generation_prompts import (
 from src.prompts.design_prompts import CEO_PROMPT, CPO_PROMPT, CPO_REVIEW_PROMPT
 from src.prompts.testing_prompts import FIXER_PROMPT, LOGIC_REVIEW_PROMPT, LOGIC_FIXER_PROMPT
 
-
-class FileSkeleton(BaseModel):
-    filename: str = Field(description="The name of the file (e.g., 'game.py')")
-    purpose: str = Field(description="Brief explanation of the file's role")
-    skeleton_code: str = Field(description="Python skeleton code with class/method definitions and docstrings")
-
-
 class TechnicalPlan(BaseModel):
     architecture: str = Field(description="Overview of the system architecture")
-    files: List[FileSkeleton] = Field(description="List of files to generate")
     constraints: List[str] = Field(description="Critical technical constraints (e.g., 'Check NoneType')")
-
 
 class ArcadeAgentChain:
     def __init__(self, provider="openai", model=None, temperature=0.7):
