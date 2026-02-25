@@ -1,11 +1,12 @@
 import os
 import json
 import sys
+import re
 import traceback
 
 from langgraph.graph import StateGraph, START, END
 
-from generation.game_state import GameState
+from src.generation.game_state import GameState
 from src.generation.chains import ArcadeAgentChain
 from src.generation.asset_gen import generate_assets
 from src.utils import clean_code_content, save_generated_files
@@ -90,7 +91,79 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
             log_callback("[System] Detected Platformer. Injecting Gravity Logic...")
             math_injection = PLATFORMER_CHEAT_SHEET
 
-        log_callback("[Programmer] Implementing game.py with RAG & Math Tools...")
+        # ==========================================
+        # AI Template Decision & Injection (Using Chain)
+        # ==========================================
+        log_callback("[Programmer] AI deciding on required templates...")
+
+        needed_templates = []
+        try:
+            resp = agents.get_template_decision_chain().invoke({"gdd": state["gdd"][:1500]})
+
+            match = re.search(r'\[.*?\]', resp, re.DOTALL)
+            if match:
+                parsed_list = json.loads(match.group(0))
+                needed_templates = [t for t in parsed_list if t in ["menu.py", "camera.py", "asset_manager.py"]]
+            if not needed_templates:
+                needed_templates = ["asset_manager.py", "camera.py", "menu.py"]  # Fallback
+        except Exception as e:
+            log_callback(f"[Warning] Template decision failed, using defaults. Error: {e}")
+            needed_templates = ["asset_manager.py", "camera.py", "menu.py"]
+
+        log_callback(f"[Programmer] Selected templates: {needed_templates}")
+
+        template_code_blocks = []
+        template_instructions = ""
+
+        # Parse template folder path
+        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+        template_dir = os.path.join(root_dir, "src", "generation", "template")
+
+        for t_file in needed_templates:
+            t_path = os.path.join(template_dir, t_file)
+            if os.path.exists(t_path):
+                with open(t_path, "r", encoding="utf-8") as f:
+                    template_code_blocks.append(
+                        [t_file, f.read()]
+                    )
+
+                # Give API Usage constraint
+                if "asset_manager" in t_file:
+                    template_instructions += (
+                        "**IMPORTANT**: You must import this file first: from asset_manager import *\n\n"
+                        "**AssetManager**: NEVER use `arcade.load_texture`. ALWAYS load sprites like this:\n"
+                        "`self.texture = AssetManager.get_texture('player.png', fallback_color=arcade.color.RED, width=32, height=32)`\n"
+                    )
+                elif "camera" in t_file:
+                    template_instructions += (
+                        "**IMPORTANT**: You must import this file first: from camera import *\n\n"
+                        "**FollowCamera**: Use this for scrolling levels. Usage:\n"
+                        "- Init: `self.camera = FollowCamera(SCREEN_WIDTH, SCREEN_HEIGHT, map_width, map_height)`\n"
+                        "- Draw: Call `self.camera.use()` before drawing world sprites. Call `self.ui_camera.use()` before drawing HUD.\n"
+                        "- Update: Call `self.camera.update_to_target(self.player)` in your `on_update` method.\n"
+                    )
+                elif "menu" in t_file:
+                    template_instructions += (
+                        "**IMPORTANT**: You must import this file first: from menu import *\n\n"
+                        "**PauseView**: DO NOT implement `self.paused = True`. Instead, handle the ESC key to pause by calling:\n"
+                        "`pause_view = PauseView(self)`\n"
+                        "`self.window.show_view(pause_view)`\n"
+                    )
+            else:
+                log_callback(f"[Warning] Template file not found: {t_path}")
+
+        template_injection_prompt = ""
+        if template_instructions:
+            template_injection_prompt = (
+                "\n[PRE-INJECTED TEMPLATES (CRITICAL)]\n"
+                f"{template_instructions}"
+                "The following utility classes have ALREADY been injected into your code.\n"
+                "DO NOT re-implement them. You MUST use them exactly as shown above."
+            )
+        print("[TEMPLATE]", template_injection_prompt)
+        # ==========================================
+
+        log_callback("[Programmer] Implementing game.py with RAG, Math & Templates...")
         complexity_constraints = (
             "1. Write verbose code with detailed comments.\n"
             "2. Implement at least 3 different enemy types or obstacles if applicable.\n"
@@ -99,7 +172,8 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
             "5. Implement a proper Game Over view and Restart mechanic."
         )
         constraints = "\n".join(state["architecture_plan"].get('constraints', []))
-        full_constraints = f"{constraints}\n\n{complexity_constraints}"
+
+        full_constraints = f"{constraints}\n\n{complexity_constraints}\n{template_injection_prompt}"
 
         response = agents.get_programmer_chain().invoke({
             "architecture_plan": state["architecture_plan"],
@@ -111,6 +185,7 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
         content = response.content if hasattr(response, 'content') else str(response)
         cleaned_code = clean_code_content(content)
 
+
         # Generate Fuzzer Logic
         log_callback("[Test] Generating Fuzzer logic snippet...")
         fuzzer_response = agents.get_fuzzer_chain().invoke({"gdd": state["gdd"]})
@@ -118,6 +193,8 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
         cleaned_fuzzer_logic = clean_code_content(fuzzer_logic)
 
         project_files = {"game.py": cleaned_code, "fuzz_logic.py": cleaned_fuzzer_logic}
+        for t_file, code in template_code_blocks:
+            project_files[t_file] = code
 
         # Save files to disk for testing
         save_generated_files(project_files, work_dir)
