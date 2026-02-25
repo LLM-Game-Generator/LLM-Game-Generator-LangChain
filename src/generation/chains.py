@@ -75,6 +75,23 @@ class ArcadeAgentChain:
         ])
         return prompt | self.llm | self.json_parser
 
+    def get_template_decision_chain(self):
+        """
+        [NEW] Chain to decide which pre-built templates to inject into the game code.
+        """
+        prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content="You are a technical software architect specializing in the Arcade framework."),
+            ("user",
+             "Analyze this Game Design Document (GDD) and decide which Python template modules are needed for the game.\n"
+             "Available templates:\n"
+             "- \"menu.py\": Provides `PauseView` and `SettingsView` (Arcade GUI) for pause menu and volume control.\n"
+             "- \"camera.py\": Provides `FollowCamera` for 2D scrolling if the game world/map is larger than the screen.\n"
+             "- \"asset_manager.py\": Provides `AssetManager` for safely loading images and sounds. ALWAYS recommend this if game has graphics.\n\n"
+             "GDD:\n{gdd}\n\n"
+             "Return ONLY a JSON list of filenames. Example: [\"menu.py\", \"asset_manager.py\"]")
+        ])
+        return prompt | self.llm | StrOutputParser()
+
     def get_plan_reviewer_chain(self):
         prompt = ChatPromptTemplate.from_messages([
             SystemMessage(content=PLAN_REVIEW_PROMPT),
