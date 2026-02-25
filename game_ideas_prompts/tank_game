@@ -1,0 +1,36 @@
+I want a tank game
+### Game Specifications:
+
+1. **Window Setup:**
+   - Screen size: 800 width x 600 height.
+   - Title: "Tank Defender".
+   - Background color: Sand or Dark Green.
+
+2. **Player Tank:**
+   - Represented by a simple colored rectangle or a pre-built arcade shape/sprite.
+   - Spawns in the center of the screen.
+   - **Movement:** Uses 'W', 'A', 'S', 'D' keys to move up, left, down, and right.
+   - **Aiming:** The tank (or its turret) rotates to face the current mouse cursor position.
+   - **Shooting:** Left mouse click fires a bullet towards the mouse cursor's direction.
+
+3. **Enemies:**
+   - Spawn randomly near the edges of the screen every few seconds.
+   - Continuously move directly towards the player's current position.
+   - If an enemy touches the player, the player loses 1 health (start with 5 health).
+         - The enemies can shoot to the player tank, but don't shoot too fast to ensure it's playable.
+         - The different color of enemies represent different scores, and the scores should be shown on enemy. (At least implement three different enemies)
+         - The higher the score that the enemy is, the higher the speed it shoots.
+
+4. **Combat & Collisions:**
+   - Bullets travel in a straight line based on the angle they were fired.
+   - When a bullet hits an enemy, both the bullet and the enemy are destroyed, and the player earns 10 points.
+   - Bullets should be removed from memory if they fly off the screen to prevent lag.
+
+5. **UI & State:**
+   - Display the current Score and Player Health in the top-left corner.
+   - When health reaches 0, display a "GAME OVER" message in the center of the screen and stop enemy spawning/movement.
+
+### Technical Constraints:
+- ONLY use the `arcade` library and standard Python libraries (like `math` and `random`).
+- Do not use external image assets (no `.png` or `.jpg` files). Generate the player, enemies, and bullets  to ensure the code runs immediately without missing files.
+- Ensure the math for calculating angles is correct for bullet trajectories and turret rotation.
