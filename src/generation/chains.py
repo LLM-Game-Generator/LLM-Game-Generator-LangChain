@@ -2,7 +2,7 @@ from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 
 from src.generation.model_factory import get_langchain_model
 from src.generation.arcade_tools import ARCADE_LANGCHAIN_TOOLS
@@ -19,10 +19,32 @@ class TechnicalPlan(BaseModel):
     architecture: str = Field(description="Overview of the system architecture")
     constraints: List[str] = Field(description="Critical technical constraints (e.g., 'Check NoneType')")
 
+class FixingCodes(BaseModel):
+    status: str = Field(description="Whether the logic review is pass")
+    start_line: Optional[int] = Field(
+        default=None,
+        description="Start line of the code that needs to be fixed in the original file."
+    )
+    end_line: Optional[int] = Field(
+        default=None,
+        description="End line of the code that needs to be fixed in the original file."
+    )
+    codes_to_replace: Optional[str] = Field(
+        default=None,
+        description=(
+            "The fully corrected Python code snippet to replace the lines from start_line to end_line. "
+            "CRITICAL: The output MUST be strictly enclosed in markdown code blocks like ```python= ... ```. "
+            "It MUST adhere completely to Arcade 2.6.x standard (e.g., use 'arcade.draw_rectangle_filled' and 'arcade.start_render()', "
+            "NEVER use Arcade 3.0 APIs like 'draw_rect_filled')."
+        )
+    )
+
+
 class ArcadeAgentChain:
     def __init__(self, provider="openai", model=None, temperature=0.7):
         self.llm = get_langchain_model(provider, model, temperature)
         self.json_parser = JsonOutputParser(pydantic_object=TechnicalPlan)
+        self.fixing_codes_parser = JsonOutputParser(pydantic_object=FixingCodes)
 
     # --- Phase 1: Design (CEO/CPO) ---
     def get_ceo_chain(self):
@@ -144,10 +166,10 @@ class ArcadeAgentChain:
 
     def get_logic_reviewer_chain(self):
         prompt = ChatPromptTemplate.from_messages([
-            SystemMessage(content=LOGIC_FIXER_PROMPT),
+            SystemMessage(content=LOGIC_REVIEW_PROMPT),
             ("user", "【CODE】:\n{code}")
         ])
-        return prompt | self.llm | StrOutputParser()
+        return prompt | self.llm | self.fixing_codes_parser
 
     def get_logic_fixer_chain(self):
         combined_prompt = f"{LOGIC_FIXER_PROMPT}"
