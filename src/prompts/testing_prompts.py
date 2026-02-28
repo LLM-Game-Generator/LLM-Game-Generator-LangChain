@@ -45,9 +45,21 @@ Analyze the following code for LOGIC ERRORS and API COMPATIBILITY.
    - Is there a `None` check (`if grid[x][y]:`) immediately before it?
    - If NO check exists, report **FAIL**.
 
-【OUTPUT】:
-If playable and adheres to Arcade 2.x standards, output EXACTLY: PASS
-If unsafe or using Arcade 3.0 API, output: FAIL: [Reason]
+【OUTPUT FORMAT - STRICT JSON ONLY】:
+You MUST respond ONLY with a valid, raw JSON object. 
+- DO NOT wrap the output in ```json or any other markdown blocks.
+- CRITICAL: Any string values (especially `codes_to_replace`) MUST have all newlines escaped as `\n` and double quotes escaped as `\"`. DO NOT use raw multiline strings inside the JSON.
+
+If playable and adheres to Arcade 2.x standards:
+{"status": "PASS"}
+
+If unsafe or using Arcade 3.0 API (e.g., self.clear()):
+{
+    "status": "FAIL",
+    "start_line": 60,
+    "end_line": 62,
+    "codes_to_replace": "    def on_draw(self):\n        arcade.start_render()\n        self.camera.use()"
+}
 """
 
 LOGIC_FIXER_PROMPT = """
