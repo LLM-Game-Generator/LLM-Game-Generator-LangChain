@@ -14,5 +14,6 @@ dependencies = [
     "langchain-ollama>=1.0.1",
     "langchain-openai>=1.1.9",
     "langgraph>=1.0.8",
+    "pytest>=9.0.2",
     "python-dotenv>=1.2.1",
 ]
