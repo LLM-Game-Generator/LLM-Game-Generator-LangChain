@@ -14,30 +14,31 @@ class AssetManager:
     @classmethod
     def get_texture(cls, path: str, fallback_color=arcade.color.MAGENTA, width=32, height=32) -> arcade.Texture:
         """
-        Safely load a texture. Generates a solid color square if not found.
+        Normalize LLM's function call. Safely load a texture. Generates a solid color square if not found.
         """
-        if path in cls._textures:
-            return cls._textures[path]
+        # normalize path 
+        filename = os.path.splitext(os.path.basename(path))[0].lower() + ".png" # 統一小寫 + 強制格式為.png
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        image_path = os.path.join(project_root, "output_games", "generated_game", "pictures", filename)
+
+        # search cache
+        if image_path in cls._textures:
+            return cls._textures[image_path]
 
         try:
-            # [Fix] Use pathlib to handle OS specific separators cleanly
-            # and resolve the IDE type hint warning (forces it to be a string)
-            safe_path = str(Path(path))
+            if not os.path.exists(image_path):
+                raise FileNotFoundError(f"File not found: {image_path}")
 
-            if not os.path.exists(safe_path):
-                raise FileNotFoundError(f"File not found: {safe_path}")
-
-            texture = arcade.load_texture(safe_path)
-            cls._textures[path] = texture
+            texture = arcade.load_texture(image_path)
+            cls._textures[image_path] = texture
             return texture
 
         except Exception as e:
             print(f"[Resource Warning] Failed to load image: {path}, using fallback. Error: {e}")
-            # Dynamically create a solid color texture as a fallback
             fallback_texture = arcade.make_soft_square_texture(width, fallback_color, outer_alpha=255)
-            cls._textures[path] = fallback_texture
+            cls._textures[image_path] = fallback_texture
             return fallback_texture
-
+        
     @classmethod
     def get_sound(cls, path: str):
         """

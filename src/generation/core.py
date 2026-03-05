@@ -9,6 +9,7 @@ from langgraph.graph import StateGraph, START, END
 from src.generation.game_state import GameState
 from src.generation.chains import ArcadeAgentChain
 from src.generation.asset_gen import generate_assets
+from src.generation.picture_generate import picture_generate
 from src.utils import clean_code_content, save_generated_files
 from src.config import config
 from src.prompts.game_logic_cheat_sheet import (
@@ -159,7 +160,12 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
                     template_instructions += (
                         "**IMPORTANT**: You must import this file first: from asset_manager import *\n\n"
                         "**AssetManager**: NEVER use `arcade.load_texture`. ALWAYS load sprites like this:\n"
-                        "`self.texture = AssetManager.get_texture('player.png', fallback_color=arcade.color.RED, width=32, height=32)`\n"
+                        "`self.texture = AssetManager.get_texture('player', fallback_color=arcade.color.RED, width=32, height=32)`\n\n"
+                        "**ASSET DESCRIPTION**: Immediately after each get_texture call, write a short, concrete text description of the asset for image generation.\n"
+                        "- Must be one line only.\n"
+                        "- Must clearly describe what the sprite should look like.\n"
+                        "- Example: `# DESCRIPTION: a brave knight in shining armor wielding a sword`\n"
+                        "- Always include this DESCRIPTION comment for every asset.\n"
                     )
                 elif "camera" in t_file:
                     template_instructions += (
@@ -212,7 +218,35 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
         content = response.content if hasattr(response, 'content') else str(response)
         cleaned_code = clean_code_content(content)
 
+        #  搜尋最終程式碼中所有的圖片請求, 並從fallback size計算圖片大小, 可處理fallback size為常數和危險的格式(example : WIDTH = __import__("os").system("rm -rf /"))
+        constants = dict(re.findall(r"([A-Z_][A-Z0-9_]*)\s*=\s*(.+)", cleaned_code))
+        safe_env = {}
+        for name, expr in constants.items():
+            try:
+                safe_env[name] = eval(expr, {"__builtins__": None}, safe_env)
+            except:
+                pass
+        pattern = r"get_texture\(\s*'([^']+)'.*?width\s*=\s*([^,\s)]+).*?height\s*=\s*([^\s,)]+)\s*\)[\s\S]*?#\s*DESCRIPTION:\s*([^\n]+)"
+        matches = re.findall(pattern, cleaned_code, re.DOTALL)
+        print(matches)
+        for match in matches:
+            if len(match) != 4: continue
+            name, width, height, description = match
+            try:
+                width = eval(width, {"__builtins__": None}, safe_env)
+            except:
+                width = int(width)
 
+            try:
+                height = eval(height, {"__builtins__": None}, safe_env)
+            except:
+                height = int(height)
+            # ingore too small picture
+            if int(width) < 32 or int(height) < 32 : 
+                continue
+            size = [int(width), int(height)]
+            picture_generate(name, description, size)    
+        
         # Generate Fuzzer Logic
         log_callback("[Test] Generating Fuzzer logic snippet...")
         fuzzer_response = agents.get_fuzzer_chain().invoke({"gdd": state["gdd"]})
