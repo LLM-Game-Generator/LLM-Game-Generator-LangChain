@@ -2,6 +2,7 @@ import json
 from urllib import request
 import os
 import time
+from PIL import Image
 
 # BASE_URL = "https://interactions-articles-minister-living.trycloudflare.com"
 BASE_URL = "http://127.0.0.1:8188"
@@ -64,8 +65,14 @@ def picture_generate(name, description, size):
     print(name)
     print(description)
     print(size)
-    if size[0] < 512 : size[0] = 512
-    if size[1] < 512 : size[1] = 512
+
+    # 記住原尺寸
+    original_size = size.copy()
+    # ---------- 等比例放大到 >=512 ----------
+    w, h = size
+    scale = max(512 / w, 512 / h) if (w < 512 or h < 512) else 1
+    size = [int(w * scale), int(h * scale)]
+
     prompt_id = queue_prompt(description, size)
     history = wait_for_image(prompt_id)
 
@@ -80,4 +87,9 @@ def picture_generate(name, description, size):
     image_path = os.path.join(save_dir, filename)
 
     download_image(original_filename, save_as=image_path)
+
+    # ---------- 縮回原尺寸 ----------
+    img = Image.open(image_path)
+    img = img.resize((original_size[0], original_size[1]), Image.Resampling.NEAREST)
+    img.save(image_path)
     
