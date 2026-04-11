@@ -5,7 +5,7 @@ import traceback
 
 from langgraph.graph import StateGraph, START, END
 
-from generation.game_state import GameState
+from src.generation.game_state import GameState
 from src.generation.chains import ArcadeAgentChain
 from src.generation.asset_gen import generate_assets
 from src.utils import clean_code_content, save_generated_files
@@ -16,7 +16,9 @@ from src.prompts.game_logic_cheat_sheet import (
     PLATFORMER_CHEAT_SHEET
 )
 
-def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir: str, provider_name:str="openai"):
+from src.generation.prompt_compress_node import LocalPromptCompressor
+
+def create_game_generator_graph(agents: ArcadeAgentChain, prompt_compress_agents: LocalPromptCompressor,  log_callback, work_dir: str, provider_name:str="openai"):
     """
     Creates and returns a compiled LangGraph application.
     Passes 'agents' and 'log_callback' into the nodes via closure.
@@ -34,7 +36,8 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
             "analysis": state["ceo_analysis"],
             "feedback": state["design_feedback"]
         })
-        return {"gdd": gdd}
+        compressed_gdd = prompt_compress_agents.compress_gdd(gdd)
+        return {"gdd": compressed_gdd}
 
     def design_reviewer_node(state: GameState):
         log_callback("[Design] Reviewer critiquing GDD...")
@@ -203,8 +206,8 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
         history_errors = state["test_errors"][:-1]
         error_prompt = latest_error
         if history_errors:
-            history_str = "\n".join(history_errors)
-            error_prompt = f"[Past Failed Attempts (Do NOT repeat these mistakes)]:\n{history_str}\n\n[Latest Error]:\n{latest_error}"
+            compressed_history=prompt_compress_agents.compress_errors(history_errors)
+            error_prompt = f"[Past Failed Attempts (Do NOT repeat these mistakes)]:\n{compressed_history}\n\n[Latest Error]:\n{latest_error}"
 
         # Route to appropriate fixer chain based on error type
         if "[LogicError]" in latest_error:
@@ -302,13 +305,16 @@ def run_full_generator_pipeline(user_input, log_callback=print, provider="openai
     """
     Executes the full LangGraph pipeline automatically.
     """
+    # For other agents
     agents = ArcadeAgentChain(provider, model=None)
+    # Specifically for prompt compress agents
+    prompt_compress_agents = LocalPromptCompressor(model_name="llama3.1:latest")
     output_path = os.path.join(config.OUTPUT_DIR, "generated_game")
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
     # 1. Initialize graph
-    app_graph = create_game_generator_graph(agents, log_callback, output_path, provider_name=provider)
+    app_graph = create_game_generator_graph(agents, prompt_compress_agents, log_callback, output_path, provider_name=provider)
 
     # 2. Prepare initial State
     initial_state = {
