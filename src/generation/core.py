@@ -477,7 +477,7 @@ def run_full_generator_pipeline(user_input, log_callback=print, provider="openai
     log_callback("[Token Usage Report] Token Cost of Generation and Debug")
     log_callback(f"Prompt Tokens (Input): {token_tracker.prompt_tokens}")
     log_callback(f"Completion Tokens (Output): {token_tracker.completion_tokens}")
-    log_callback(f"One Time Max Token Usage (Input + Output): {token_tracker.one_time_token_usage}")
+    log_callback(f"One Time Max Token Usage (Input + Output): {token_tracker.one_time_max_token_usage}")
     log_callback(f"Total Tokens (All): {token_tracker.total_tokens}")
     log_callback("=" * 50)
 
