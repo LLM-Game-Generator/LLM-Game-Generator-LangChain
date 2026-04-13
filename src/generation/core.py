@@ -1,7 +1,6 @@
 import os
 import json
 import sys
-import re
 import traceback
 
 from langgraph.graph import StateGraph, START, END
@@ -17,34 +16,9 @@ from src.prompts.game_logic_cheat_sheet import (
     PLATFORMER_CHEAT_SHEET
 )
 
+from src.generation.prompt_compress_node import LocalPromptCompressor
 
-def apply_deterministic_fix(original_code: str, start_line: int, end_line: int, replacement: str) -> str:
-    """
-    Replace the codes directly by:
-    :param original_code: the original full codes
-    :param start_line: starting line number
-    :param end_line: ending line number
-    :replacement: the replacement code
-    :return the full fixed codes
-    """
-
-    # 1. slice the original code to a line by line list
-    code_lines = original_code.split('\n')
-
-    # 2. Clear the markdown marks
-    clean_replacement = replacement.replace("```python=", "").replace("```python", "").replace("```", "").strip('\n')
-
-    # 3. Dealing with the line number (starting from 1 to starting from 0)
-    start_idx = start_line - 1
-    end_idx = end_line
-
-    # 4. combine the fixing codes
-    new_code_lines = code_lines[:start_idx] + [clean_replacement] + code_lines[end_idx:]
-
-    # 5. combine to str
-    return '\n'.join(new_code_lines)
-
-def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir: str, provider_name:str="openai"):
+def create_game_generator_graph(agents: ArcadeAgentChain, prompt_compress_agents: LocalPromptCompressor,  log_callback, work_dir: str, provider_name:str="openai"):
     """
     Creates and returns a compiled LangGraph application.
     Passes 'agents' and 'log_callback' into the nodes via closure.
@@ -62,7 +36,8 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
             "analysis": state["ceo_analysis"],
             "feedback": state["design_feedback"]
         })
-        return {"gdd": gdd}
+        compressed_gdd = prompt_compress_agents.compress_gdd(gdd)
+        return {"gdd": compressed_gdd}
 
     def design_reviewer_node(state: GameState):
         log_callback("[Design] Reviewer critiquing GDD...")
@@ -118,79 +93,7 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
             log_callback("[System] Detected Platformer. Injecting Gravity Logic...")
             math_injection = PLATFORMER_CHEAT_SHEET
 
-        # ==========================================
-        # AI Template Decision & Injection (Using Chain)
-        # ==========================================
-        log_callback("[Programmer] AI deciding on required templates...")
-
-        needed_templates = []
-        try:
-            resp = agents.get_template_decision_chain().invoke({"gdd": state["gdd"][:1500]})
-
-            match = re.search(r'\[.*?\]', resp, re.DOTALL)
-            if match:
-                parsed_list = json.loads(match.group(0))
-                needed_templates = [t for t in parsed_list if t in ["menu.py", "camera.py", "asset_manager.py"]]
-            if not needed_templates:
-                needed_templates = ["asset_manager.py", "camera.py", "menu.py"]  # Fallback
-        except Exception as e:
-            log_callback(f"[Warning] Template decision failed, using defaults. Error: {e}")
-            needed_templates = ["asset_manager.py", "camera.py", "menu.py"]
-
-        log_callback(f"[Programmer] Selected templates: {needed_templates}")
-
-        template_code_blocks = []
-        template_instructions = ""
-
-        # Parse template folder path
-        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-        template_dir = os.path.join(root_dir, "src", "generation", "template")
-
-        for t_file in needed_templates:
-            t_path = os.path.join(template_dir, t_file)
-            if os.path.exists(t_path):
-                with open(t_path, "r", encoding="utf-8") as f:
-                    template_code_blocks.append(
-                        [t_file, f.read()]
-                    )
-
-                # Give API Usage constraint
-                if "asset_manager" in t_file:
-                    template_instructions += (
-                        "**IMPORTANT**: You must import this file first: from asset_manager import *\n\n"
-                        "**AssetManager**: NEVER use `arcade.load_texture`. ALWAYS load sprites like this:\n"
-                        "`self.texture = AssetManager.get_texture('player.png', fallback_color=arcade.color.RED, width=32, height=32)`\n"
-                    )
-                elif "camera" in t_file:
-                    template_instructions += (
-                        "**IMPORTANT**: You must import this file first: from camera import *\n\n"
-                        "**FollowCamera**: Use this for scrolling levels. Usage:\n"
-                        "- Init: `self.camera = FollowCamera(SCREEN_WIDTH, SCREEN_HEIGHT, map_width, map_height)`\n"
-                        "- Draw: Call `self.camera.use()` before drawing world sprites. Call `self.ui_camera.use()` before drawing HUD.\n"
-                        "- Update: Call `self.camera.update_to_target(self.player)` in your `on_update` method.\n"
-                    )
-                elif "menu" in t_file:
-                    template_instructions += (
-                        "**IMPORTANT**: You must import this file first: from menu import *\n\n"
-                        "**PauseView**: DO NOT implement `self.paused = True`. Instead, handle the ESC key to pause by calling:\n"
-                        "`pause_view = PauseView(self)`\n"
-                        "`self.window.show_view(pause_view)`\n"
-                    )
-            else:
-                log_callback(f"[Warning] Template file not found: {t_path}")
-
-        template_injection_prompt = ""
-        if template_instructions:
-            template_injection_prompt = (
-                "\n[PRE-INJECTED TEMPLATES (CRITICAL)]\n"
-                f"{template_instructions}"
-                "The following utility classes have ALREADY been injected into your code.\n"
-                "DO NOT re-implement them. You MUST use them exactly as shown above."
-            )
-        print("[TEMPLATE]", template_injection_prompt)
-        # ==========================================
-
-        log_callback("[Programmer] Implementing game.py with RAG, Math & Templates...")
+        log_callback("[Programmer] Implementing game.py with RAG & Math Tools...")
         complexity_constraints = (
             "1. Write verbose code with detailed comments.\n"
             "2. Implement at least 3 different enemy types or obstacles if applicable.\n"
@@ -199,8 +102,7 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
             "5. Implement a proper Game Over view and Restart mechanic."
         )
         constraints = "\n".join(state["architecture_plan"].get('constraints', []))
-
-        full_constraints = f"{constraints}\n\n{complexity_constraints}\n{template_injection_prompt}"
+        full_constraints = f"{constraints}\n\n{complexity_constraints}"
 
         response = agents.get_programmer_chain().invoke({
             "architecture_plan": state["architecture_plan"],
@@ -212,7 +114,6 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
         content = response.content if hasattr(response, 'content') else str(response)
         cleaned_code = clean_code_content(content)
 
-
         # Generate Fuzzer Logic
         log_callback("[Test] Generating Fuzzer logic snippet...")
         fuzzer_response = agents.get_fuzzer_chain().invoke({"gdd": state["gdd"]})
@@ -220,8 +121,6 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
         cleaned_fuzzer_logic = clean_code_content(fuzzer_logic)
 
         project_files = {"game.py": cleaned_code, "fuzz_logic.py": cleaned_fuzzer_logic}
-        for t_file, code in template_code_blocks:
-            project_files[t_file] = code
 
         # Save files to disk for testing
         save_generated_files(project_files, work_dir)
@@ -286,30 +185,12 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
         # Only runs if the game actually survives the Fuzzer!
         log_callback("[Review] Running strict API standard review...")
         review_result = agents.get_logic_reviewer_chain().invoke({"code": current_code})
-        log_callback(f"[Review] The reviewing status:{review_result['status']}")
-        if review_result['status'] != "PASS":
-            log_callback(
-                f"[Review] API Violation at lines {review_result.start_line}-{review_result.end_line}. Auto-patching...")
 
-            patched_code = apply_deterministic_fix(
-                original_code=current_code,
-                start_line=review_result['start_line'],
-                end_line=review_result['end_line'],
-                replacement=review_result['codes_to_replace']
-            )
-
-            # Write to the file and update the status
-            with open(main_file_path, "w", encoding="utf-8") as f:
-                f.write(patched_code)
-
-            new_project_files = state["project_files"]
-            new_project_files["game.py"] = patched_code
-
-            return {
-                "current_code": patched_code,
-                "project_files": new_project_files,
-                "test_errors": ["[Auto-Patched] Fixed Arcade 2.x API violation."]
-            }
+        if "PASS" not in review_result:
+            error_msg = f"[LogicError] {review_result}"
+            log_callback(f"[Review] Logic/API Rule Violation: {review_result}")
+            # Logic Errors are routed to the Logic Fixer
+            return {"test_errors": [error_msg]}
         else:
             log_callback("[Review] Strict API validation passed.")
 
@@ -317,28 +198,37 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
         return {"is_valid": True}
 
     def fixer_node(state: GameState):
-        """Memory Core: Deal with Fuzzer generated Traceback crashed Syntax Error"""
-        log_callback("[Fixer] Analyzing Traceback and reasoning the fix...")
+        """Memory Core: Fixes code based on historical error logs."""
+        log_callback("[Fixer] Reading historical error logs and attempting fix...")
         latest_error = state["test_errors"][-1]
 
-        # Combine the history errors
+        # Concatenate history to prevent the agent from repeating mistakes
         history_errors = state["test_errors"][:-1]
         error_prompt = latest_error
         if history_errors:
-            history_str = "\n".join(history_errors)
-            error_prompt = f"[Past Failed Attempts (Do NOT repeat)]:\n{history_str}\n\n[Latest Error]:\n{latest_error}"
+            compressed_history=prompt_compress_agents.compress_errors(history_errors)
+            error_prompt = f"[Past Failed Attempts (Do NOT repeat these mistakes)]:\n{compressed_history}\n\n[Latest Error]:\n{latest_error}"
 
-        response = agents.get_syntax_fixer_chain().invoke({
-            "code": state["current_code"],
-            "error": error_prompt
-        })
+        # Route to appropriate fixer chain based on error type
+        if "[LogicError]" in latest_error:
+            response = agents.get_logic_fixer_chain().invoke({
+                "code": state["current_code"],
+                "error": error_prompt,
+                "gdd": state["gdd"]
+            })
+        else:
+            response = agents.get_syntax_fixer_chain().invoke({
+                "code": state["current_code"],
+                "error": error_prompt
+            })
 
         updated_code = clean_code_content(response)
 
-        # Update file on disk
+        # Update file on disk for the next Fuzzer run
         with open(os.path.join(work_dir, "game.py"), "w", encoding="utf-8") as f:
             f.write(updated_code)
 
+        # Update project files in state
         new_project_files = state["project_files"]
         new_project_files["game.py"] = updated_code
 
@@ -415,13 +305,16 @@ def run_full_generator_pipeline(user_input, log_callback=print, provider="openai
     """
     Executes the full LangGraph pipeline automatically.
     """
+    # For other agents
     agents = ArcadeAgentChain(provider, model=None)
+    # Specifically for prompt compress agents
+    prompt_compress_agents = LocalPromptCompressor(model_name="llama3.1:latest")
     output_path = os.path.join(config.OUTPUT_DIR, "generated_game")
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
     # 1. Initialize graph
-    app_graph = create_game_generator_graph(agents, log_callback, output_path, provider_name=provider)
+    app_graph = create_game_generator_graph(agents, prompt_compress_agents, log_callback, output_path, provider_name=provider)
 
     # 2. Prepare initial State
     initial_state = {
