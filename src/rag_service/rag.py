@@ -153,8 +153,14 @@ class RagService:
                 settings=chroma_settings,
                 tenant=config.tenant
             )
-
+        elif mode == 'local':
+            """
+            Use the local memory if the mode is set to local
+            """
+            print("Bypassing config, using Ephemeral (In-Memory) Client...")
+            return chromadb.EphemeralClient()
         else:
+
             raise ValueError(f"Unsupported Chroma client_type: {mode}。Please use 'cloud' or 'http'")
 
     def _get_embedding_function(self, provider: str, base_url: str, base_port: str, model_type: str, token: str):

@@ -1,7 +1,6 @@
 import os
 import json
 import sys
-import re
 import traceback
 
 from langgraph.graph import StateGraph, START, END
@@ -17,34 +16,9 @@ from src.prompts.game_logic_cheat_sheet import (
     PLATFORMER_CHEAT_SHEET
 )
 
+from src.generation.prompt_compress_node import LocalPromptCompressor
 
-def apply_deterministic_fix(original_code: str, start_line: int, end_line: int, replacement: str) -> str:
-    """
-    Replace the codes directly by:
-    :param original_code: the original full codes
-    :param start_line: starting line number
-    :param end_line: ending line number
-    :replacement: the replacement code
-    :return the full fixed codes
-    """
-
-    # 1. slice the original code to a line by line list
-    code_lines = original_code.split('\n')
-
-    # 2. Clear the markdown marks
-    clean_replacement = replacement.replace("```python=", "").replace("```python", "").replace("```", "").strip('\n')
-
-    # 3. Dealing with the line number (starting from 1 to starting from 0)
-    start_idx = start_line - 1
-    end_idx = end_line
-
-    # 4. combine the fixing codes
-    new_code_lines = code_lines[:start_idx] + [clean_replacement] + code_lines[end_idx:]
-
-    # 5. combine to str
-    return '\n'.join(new_code_lines)
-
-def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir: str, provider_name:str="openai"):
+def create_game_generator_graph(agents: ArcadeAgentChain, prompt_compress_agents: LocalPromptCompressor,  log_callback, work_dir: str, provider_name:str="openai"):
     """
     Creates and returns a compiled LangGraph application.
     Passes 'agents' and 'log_callback' into the nodes via closure.
@@ -62,7 +36,8 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
             "analysis": state["ceo_analysis"],
             "feedback": state["design_feedback"]
         })
-        return {"gdd": gdd}
+        compressed_gdd = prompt_compress_agents.compress_gdd(gdd)
+        return {"gdd": compressed_gdd}
 
     def design_reviewer_node(state: GameState):
         log_callback("[Design] Reviewer critiquing GDD...")
@@ -208,8 +183,7 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
             "5. Implement a proper Game Over view and Restart mechanic."
         )
         constraints = "\n".join(state["architecture_plan"].get('constraints', []))
-
-        full_constraints = f"{constraints}\n\n{complexity_constraints}\n{template_injection_prompt}"
+        full_constraints = f"{constraints}\n\n{complexity_constraints}"
 
         response = agents.get_programmer_chain().invoke({
             "architecture_plan": state["architecture_plan"],
@@ -241,8 +215,6 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
         cleaned_fuzzer_logic = clean_code_content(fuzzer_logic)
 
         project_files = {"game.py": cleaned_code, "fuzz_logic.py": cleaned_fuzzer_logic}
-        for t_file, code in template_code_blocks:
-            project_files[t_file] = code
 
         # Save files to disk for testing
         save_generated_files(project_files, work_dir)
@@ -307,30 +279,12 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
         # Only runs if the game actually survives the Fuzzer!
         log_callback("[Review] Running strict API standard review...")
         review_result = agents.get_logic_reviewer_chain().invoke({"code": current_code})
-        log_callback(f"[Review] The reviewing status:{review_result['status']}")
-        if review_result['status'] != "PASS":
-            log_callback(
-                f"[Review] API Violation at lines {review_result.start_line}-{review_result.end_line}. Auto-patching...")
 
-            patched_code = apply_deterministic_fix(
-                original_code=current_code,
-                start_line=review_result['start_line'],
-                end_line=review_result['end_line'],
-                replacement=review_result['codes_to_replace']
-            )
-
-            # Write to the file and update the status
-            with open(main_file_path, "w", encoding="utf-8") as f:
-                f.write(patched_code)
-
-            new_project_files = state["project_files"]
-            new_project_files["game.py"] = patched_code
-
-            return {
-                "current_code": patched_code,
-                "project_files": new_project_files,
-                "test_errors": ["[Auto-Patched] Fixed Arcade 2.x API violation."]
-            }
+        if "PASS" not in review_result:
+            error_msg = f"[LogicError] {review_result}"
+            log_callback(f"[Review] Logic/API Rule Violation: {review_result}")
+            # Logic Errors are routed to the Logic Fixer
+            return {"test_errors": [error_msg]}
         else:
             log_callback("[Review] Strict API validation passed.")
 
@@ -338,28 +292,37 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
         return {"is_valid": True}
 
     def fixer_node(state: GameState):
-        """Memory Core: Deal with Fuzzer generated Traceback crashed Syntax Error"""
-        log_callback("[Fixer] Analyzing Traceback and reasoning the fix...")
+        """Memory Core: Fixes code based on historical error logs."""
+        log_callback("[Fixer] Reading historical error logs and attempting fix...")
         latest_error = state["test_errors"][-1]
 
-        # Combine the history errors
+        # Concatenate history to prevent the agent from repeating mistakes
         history_errors = state["test_errors"][:-1]
         error_prompt = latest_error
         if history_errors:
-            history_str = "\n".join(history_errors)
-            error_prompt = f"[Past Failed Attempts (Do NOT repeat)]:\n{history_str}\n\n[Latest Error]:\n{latest_error}"
+            compressed_history=prompt_compress_agents.compress_errors(history_errors)
+            error_prompt = f"[Past Failed Attempts (Do NOT repeat these mistakes)]:\n{compressed_history}\n\n[Latest Error]:\n{latest_error}"
 
-        response = agents.get_syntax_fixer_chain().invoke({
-            "code": state["current_code"],
-            "error": error_prompt
-        })
+        # Route to appropriate fixer chain based on error type
+        if "[LogicError]" in latest_error:
+            response = agents.get_logic_fixer_chain().invoke({
+                "code": state["current_code"],
+                "error": error_prompt,
+                "gdd": state["gdd"]
+            })
+        else:
+            response = agents.get_syntax_fixer_chain().invoke({
+                "code": state["current_code"],
+                "error": error_prompt
+            })
 
         updated_code = clean_code_content(response)
 
-        # Update file on disk
+        # Update file on disk for the next Fuzzer run
         with open(os.path.join(work_dir, "game.py"), "w", encoding="utf-8") as f:
             f.write(updated_code)
 
+        # Update project files in state
         new_project_files = state["project_files"]
         new_project_files["game.py"] = updated_code
 
@@ -436,13 +399,16 @@ def run_full_generator_pipeline(user_input, log_callback=print, provider="openai
     """
     Executes the full LangGraph pipeline automatically.
     """
+    # For other agents
     agents = ArcadeAgentChain(provider, model=None)
+    # Specifically for prompt compress agents
+    prompt_compress_agents = LocalPromptCompressor(model_name="llama3.1:latest")
     output_path = os.path.join(config.OUTPUT_DIR, "generated_game")
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
     # 1. Initialize graph
-    app_graph = create_game_generator_graph(agents, log_callback, output_path, provider_name=provider)
+    app_graph = create_game_generator_graph(agents, prompt_compress_agents, log_callback, output_path, provider_name=provider)
 
     # 2. Prepare initial State
     initial_state = {
