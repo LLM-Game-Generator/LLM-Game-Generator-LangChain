@@ -140,6 +140,7 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
         log_callback(f"[Programmer] Selected templates: {needed_templates}")
 
         template_code_blocks = []
+        guaranteed_imports = []  # 儲存必須出現的 imports
         template_instructions = ""
 
         # Parse template folder path
@@ -154,40 +155,48 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
                         [t_file, f.read()]
                     )
 
-                # Give API Usage constraint
+                # Give API Usage constraint (變得極度明確)
                 if "asset_manager" in t_file:
+                    guaranteed_imports.append("from asset_manager import AssetManager")
                     template_instructions += (
-                        "**IMPORTANT**: You must import this file first: from asset_manager import *\n\n"
-                        "**AssetManager**: NEVER use `arcade.load_texture`. ALWAYS load sprites like this:\n"
-                        "`self.texture = AssetManager.get_texture('player.png', fallback_color=arcade.color.RED, width=32, height=32)`\n"
+                        "- **Asset Loading (MANDATORY)**: NEVER use `arcade.load_texture`. ALWAYS use `AssetManager` like this:\n"
+                        "  `self.texture = AssetManager.get_texture('player.png', fallback_color=arcade.color.RED, width=32, height=32)`\n"
                     )
                 elif "camera" in t_file:
+                    guaranteed_imports.append("from camera import FollowCamera")
                     template_instructions += (
-                        "**IMPORTANT**: You must import this file first: from camera import *\n\n"
-                        "**FollowCamera**: Use this for scrolling levels. Usage:\n"
-                        "- Init: `self.camera = FollowCamera(SCREEN_WIDTH, SCREEN_HEIGHT, map_width, map_height)`\n"
-                        "- Draw: Call `self.camera.use()` before drawing world sprites. Call `self.ui_camera.use()` before drawing HUD.\n"
-                        "- Update: Call `self.camera.update_to_target(self.player)` in your `on_update` method.\n"
+                        "- **Scrolling (MANDATORY)**: Use `FollowCamera` for scrolling levels. Usage:\n"
+                        "  * Init: `self.camera = FollowCamera(SCREEN_WIDTH, SCREEN_HEIGHT, map_width, map_height)`\n"
+                        "  * Draw: Call `self.camera.use()` before drawing world sprites. Call `self.ui_camera.use()` for HUD.\n"
+                        "  * Update: Call `self.camera.update_to_target(self.player)` in `on_update`.\n"
                     )
                 elif "menu" in t_file:
+                    guaranteed_imports.append("from menu import PauseView")
                     template_instructions += (
-                        "**IMPORTANT**: You must import this file first: from menu import *\n\n"
-                        "**PauseView**: DO NOT implement `self.paused = True`. Instead, handle the ESC key to pause by calling:\n"
-                        "`pause_view = PauseView(self)`\n"
-                        "`self.window.show_view(pause_view)`\n"
+                        "- **Pause System (MANDATORY)**: DO NOT write `self.paused = True`. Instead, handle ESC key like this:\n"
+                        "  `if key == arcade.key.ESCAPE: self.window.show_view(PauseView(self))`\n"
                     )
             else:
                 log_callback(f"[Warning] Template file not found: {t_path}")
 
+        imports_str = "\n".join(guaranteed_imports)
         template_injection_prompt = ""
+
         if template_instructions:
             template_injection_prompt = (
-                "\n[PRE-INJECTED TEMPLATES (CRITICAL)]\n"
-                f"{template_instructions}"
-                "The following utility classes have ALREADY been injected into your code.\n"
-                "DO NOT re-implement them. You MUST use them exactly as shown above."
+                "\n=======================================================\n"
+                "🔥 CRITICAL: PRE-BUILT MODULES REQUIREMENT 🔥\n"
+                "=======================================================\n"
+                "I have already created the template files for you. You MUST use them in `game.py`!\n\n"
+                "1. YOU MUST PUT THESE IMPORTS AT THE VERY TOP OF `game.py`:\n"
+                "```python\n"
+                f"{imports_str}\n"
+                "```\n\n"
+                "2. YOU MUST FOLLOW THESE IMPLEMENTATION RULES:\n"
+                f"{template_instructions}\n"
+                "Failure to use these classes will result in immediate system crash!\n"
+                "=======================================================\n"
             )
-        print("[TEMPLATE]", template_injection_prompt)
         # ==========================================
 
         log_callback("[Programmer] Implementing game.py with RAG, Math & Templates...")
@@ -212,6 +221,18 @@ def create_game_generator_graph(agents: ArcadeAgentChain, log_callback, work_dir
         content = response.content if hasattr(response, 'content') else str(response)
         cleaned_code = clean_code_content(content)
 
+        # ==========================================
+        # [NEW] Failsafe: 自動補全 LLM 漏掉的 Imports
+        # ==========================================
+        for imp in guaranteed_imports:
+            if imp not in cleaned_code:
+                log_callback(f"[Failsafe] LLM forgot to import '{imp}'. Auto-injecting...")
+                if "import arcade" in cleaned_code:
+                    # 插入在 import arcade 之後
+                    cleaned_code = cleaned_code.replace("import arcade", f"import arcade\n{imp}")
+                else:
+                    # 如果連 import arcade 都沒有，直接加在最頂端
+                    cleaned_code = f"import arcade\n{imp}\n" + cleaned_code
 
         # Generate Fuzzer Logic
         log_callback("[Test] Generating Fuzzer logic snippet...")
@@ -450,6 +471,16 @@ def run_full_generator_pipeline(user_input, log_callback=print, provider="openai
     #         f.write(img)
     # except Exception as e:
     #     log_callback(f"[Graph Visualization Error] Could not generate graph image: {str(e)}")
+
+    token_tracker = agents.get_token_tracker()
+    log_callback("=" * 50)
+    log_callback("[Token Usage Report] Token Cost of Generation and Debug")
+    log_callback(f"Prompt Tokens (Input): {token_tracker.prompt_tokens}")
+    log_callback(f"Completion Tokens (Output): {token_tracker.completion_tokens}")
+    log_callback(f"One Time Max Token Usage (Input + Output): {token_tracker.one_time_token_usage}")
+    log_callback(f"Total Tokens (All): {token_tracker.total_tokens}")
+    log_callback("=" * 50)
+
 
     # Return the final project files dictionary for app.py to process
     return final_state["project_files"]
