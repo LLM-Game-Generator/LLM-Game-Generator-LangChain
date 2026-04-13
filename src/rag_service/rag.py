@@ -215,8 +215,8 @@ class RagService:
 
 # Global Instance
 rag_config = RagConfig(collection_name=config.ARCADE_COLLECTION_NAME)
-rag_instance = RagService(rag_config=rag_config)
-
+# rag_instance = RagService(rag_config=rag_config)
+rag_instance = None
 
 # if __name__ == '__main__':
 #     rag_config = RagConfig(collection_name=config.ARCADE_COLLECTION_NAME)
