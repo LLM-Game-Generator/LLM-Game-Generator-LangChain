@@ -1,6 +1,7 @@
 import os
 import json
 import sys
+import re
 import traceback
 
 from langgraph.graph import StateGraph, START, END
@@ -18,7 +19,33 @@ from src.prompts.game_logic_cheat_sheet import (
 
 from src.generation.prompt_compress_node import LocalPromptCompressor
 
-def create_game_generator_graph(agents: ArcadeAgentChain, prompt_compress_agents: LocalPromptCompressor,  log_callback, work_dir: str, provider_name:str="openai"):
+def apply_deterministic_fix(original_code: str, start_line: int, end_line: int, replacement: str) -> str:
+    """
+    Replace the codes directly by:
+    :param original_code: the original full codes
+    :param start_line: starting line number
+    :param end_line: ending line number
+    :replacement: the replacement code
+    :return the full fixed codes
+    """
+
+    # 1. slice the original code to a line by line list
+    code_lines = original_code.split('\n')
+
+    # 2. Clear the markdown marks
+    clean_replacement = replacement.replace("```python=", "").replace("```python", "").replace("```", "").strip('\n')
+
+    # 3. Dealing with the line number (starting from 1 to starting from 0)
+    start_idx = start_line - 1
+    end_idx = end_line
+
+    # 4. combine the fixing codes
+    new_code_lines = code_lines[:start_idx] + [clean_replacement] + code_lines[end_idx:]
+
+    # 5. combine to str
+    return '\n'.join(new_code_lines)
+
+def create_game_generator_graph(agents: ArcadeAgentChain, prompt_compress_agents, log_callback, work_dir: str, provider_name:str="openai"):
     """
     Creates and returns a compiled LangGraph application.
     Passes 'agents' and 'log_callback' into the nodes via closure.
@@ -93,7 +120,88 @@ def create_game_generator_graph(agents: ArcadeAgentChain, prompt_compress_agents
             log_callback("[System] Detected Platformer. Injecting Gravity Logic...")
             math_injection = PLATFORMER_CHEAT_SHEET
 
-        log_callback("[Programmer] Implementing game.py with RAG & Math Tools...")
+        # ==========================================
+        # AI Template Decision & Injection (Using Chain)
+        # ==========================================
+        log_callback("[Programmer] AI deciding on required templates...")
+
+        needed_templates = []
+        try:
+            resp = agents.get_template_decision_chain().invoke({"gdd": state["gdd"][:1500]})
+
+            match = re.search(r'\[.*?\]', resp, re.DOTALL)
+            if match:
+                parsed_list = json.loads(match.group(0))
+                needed_templates = [t for t in parsed_list if t in ["menu.py", "camera.py", "asset_manager.py"]]
+            if not needed_templates:
+                needed_templates = ["asset_manager.py", "camera.py", "menu.py"]  # Fallback
+        except Exception as e:
+            log_callback(f"[Warning] Template decision failed, using defaults. Error: {e}")
+            needed_templates = ["asset_manager.py", "camera.py", "menu.py"]
+
+        log_callback(f"[Programmer] Selected templates: {needed_templates}")
+
+        template_code_blocks = []
+        guaranteed_imports = []  # 儲存必須出現的 imports
+        template_instructions = ""
+
+        # Parse template folder path
+        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+        template_dir = os.path.join(root_dir, "src", "generation", "template")
+
+        for t_file in needed_templates:
+            t_path = os.path.join(template_dir, t_file)
+            if os.path.exists(t_path):
+                with open(t_path, "r", encoding="utf-8") as f:
+                    template_code_blocks.append(
+                        [t_file, f.read()]
+                    )
+
+                # Give API Usage constraint (變得極度明確)
+                if "asset_manager" in t_file:
+                    guaranteed_imports.append("from asset_manager import AssetManager")
+                    template_instructions += (
+                        "- **Asset Loading (MANDATORY)**: NEVER use `arcade.load_texture`. ALWAYS use `AssetManager` like this:\n"
+                        "  `self.texture = AssetManager.get_texture('player.png', fallback_color=arcade.color.RED, width=32, height=32)`\n"
+                    )
+                elif "camera" in t_file:
+                    guaranteed_imports.append("from camera import FollowCamera")
+                    template_instructions += (
+                        "- **Scrolling (MANDATORY)**: Use `FollowCamera` for scrolling levels. Usage:\n"
+                        "  * Init: `self.camera = FollowCamera(SCREEN_WIDTH, SCREEN_HEIGHT, map_width, map_height)`\n"
+                        "  * Draw: Call `self.camera.use()` before drawing world sprites. Call `self.ui_camera.use()` for HUD.\n"
+                        "  * Update: Call `self.camera.update_to_target(self.player)` in `on_update`.\n"
+                    )
+                elif "menu" in t_file:
+                    guaranteed_imports.append("from menu import PauseView")
+                    template_instructions += (
+                        "- **Pause System (MANDATORY)**: DO NOT write `self.paused = True`. Instead, handle ESC key like this:\n"
+                        "  `if key == arcade.key.ESCAPE: self.window.show_view(PauseView(self))`\n"
+                    )
+            else:
+                log_callback(f"[Warning] Template file not found: {t_path}")
+
+        imports_str = "\n".join(guaranteed_imports)
+        template_injection_prompt = ""
+
+        if template_instructions:
+            template_injection_prompt = (
+                "\n=======================================================\n"
+                "🔥 CRITICAL: PRE-BUILT MODULES REQUIREMENT 🔥\n"
+                "=======================================================\n"
+                "I have already created the template files for you. You MUST use them in `game.py`!\n\n"
+                "1. YOU MUST PUT THESE IMPORTS AT THE VERY TOP OF `game.py`:\n"
+                "```python\n"
+                f"{imports_str}\n"
+                "```\n\n"
+                "2. YOU MUST FOLLOW THESE IMPLEMENTATION RULES:\n"
+                f"{template_instructions}\n"
+                "Failure to use these classes will result in immediate system crash!\n"
+                "=======================================================\n"
+            )
+        # ==========================================
+
+        log_callback("[Programmer] Implementing game.py with RAG, Math & Templates...")
         complexity_constraints = (
             "1. Write verbose code with detailed comments.\n"
             "2. Implement at least 3 different enemy types or obstacles if applicable.\n"
@@ -114,6 +222,19 @@ def create_game_generator_graph(agents: ArcadeAgentChain, prompt_compress_agents
         content = response.content if hasattr(response, 'content') else str(response)
         cleaned_code = clean_code_content(content)
 
+        # ==========================================
+        # [NEW] Failsafe: 自動補全 LLM 漏掉的 Imports
+        # ==========================================
+        for imp in guaranteed_imports:
+            if imp not in cleaned_code:
+                log_callback(f"[Failsafe] LLM forgot to import '{imp}'. Auto-injecting...")
+                if "import arcade" in cleaned_code:
+                    # 插入在 import arcade 之後
+                    cleaned_code = cleaned_code.replace("import arcade", f"import arcade\n{imp}")
+                else:
+                    # 如果連 import arcade 都沒有，直接加在最頂端
+                    cleaned_code = f"import arcade\n{imp}\n" + cleaned_code
+
         # Generate Fuzzer Logic
         log_callback("[Test] Generating Fuzzer logic snippet...")
         fuzzer_response = agents.get_fuzzer_chain().invoke({"gdd": state["gdd"]})
@@ -121,6 +242,8 @@ def create_game_generator_graph(agents: ArcadeAgentChain, prompt_compress_agents
         cleaned_fuzzer_logic = clean_code_content(fuzzer_logic)
 
         project_files = {"game.py": cleaned_code, "fuzz_logic.py": cleaned_fuzzer_logic}
+        for t_file, code in template_code_blocks:
+            project_files[t_file] = code
 
         # Save files to disk for testing
         save_generated_files(project_files, work_dir)
@@ -343,6 +466,16 @@ def run_full_generator_pipeline(user_input, log_callback=print, provider="openai
     #         f.write(img)
     # except Exception as e:
     #     log_callback(f"[Graph Visualization Error] Could not generate graph image: {str(e)}")
+
+    token_tracker = agents.get_token_tracker()
+    log_callback("=" * 50)
+    log_callback("[Token Usage Report] Token Cost of Generation and Debug")
+    log_callback(f"Prompt Tokens (Input): {token_tracker.prompt_tokens}")
+    log_callback(f"Completion Tokens (Output): {token_tracker.completion_tokens}")
+    log_callback(f"One Time Max Token Usage (Input + Output): {token_tracker.one_time_token_usage}")
+    log_callback(f"Total Tokens (All): {token_tracker.total_tokens}")
+    log_callback("=" * 50)
+
 
     # Return the final project files dictionary for app.py to process
     return final_state["project_files"]
