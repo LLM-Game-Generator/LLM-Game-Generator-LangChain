@@ -63,8 +63,7 @@ def create_game_generator_graph(agents: ArcadeAgentChain, prompt_compress_agents
             "analysis": state["ceo_analysis"],
             "feedback": state["design_feedback"]
         })
-        compressed_gdd = prompt_compress_agents.compress_gdd(gdd)
-        return {"gdd": compressed_gdd}
+        return {"gdd": gdd}
 
     def design_reviewer_node(state: GameState):
         log_callback("[Design] Reviewer critiquing GDD...")
@@ -127,7 +126,14 @@ def create_game_generator_graph(agents: ArcadeAgentChain, prompt_compress_agents
 
         needed_templates = []
         try:
+            """ 
+            Change from hard coded cutting the gdd into extraction
+            Original:
             resp = agents.get_template_decision_chain().invoke({"gdd": state["gdd"][:1500]})
+            """
+            log_callback("[Programmer] Extracting core mechanics for template decision...")
+            compressed_gdd = prompt_compress_agents.get_gdd_mechanics_extractor().invoke({"gdd": state["gdd"]})
+            resp = agents.get_template_decision_chain().invoke({"gdd": compressed_gdd})
 
             match = re.search(r'\[.*?\]', resp, re.DOTALL)
             if match:

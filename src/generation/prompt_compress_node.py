@@ -34,18 +34,11 @@ class LocalPromptCompressor:
 
         return chain.invoke({"errors": error_history})
 
-    def compress_gdd(self, gdd_content: str) -> str:
-        """
-        To compress the gdd into a concise format suitable for prompt injection.
-        """
+    def get_gdd_mechanics_extractor(self):
         prompt = ChatPromptTemplate.from_messages([
-            SystemMessage(content="""
-               You are a GDD summarization assistant.\n\n
-               Your goal is to summarize the given Game Design Document (GDD) into a concise format that retains all critical information, constraints, and instructions necessary for game development.\n\n
-               Make sure that you do NOT lose any important technical details, constraints, and instructions in the summarization process.\n\n
-               """),
-            ("user", "Summarize the following gdd into a concise format suitable for prompt injection:\n\n{gdd}")
+            SystemMessage(
+                content="You are a technical extractor. Extract ONLY the core gameplay mechanics, controls, and win/loss conditions from the GDD.\n\n"
+                        "Discard all story, visual, and audio descriptions. Be extremely concise."),
+            ("user", "GDD:\n{gdd}")
         ])
-
-        chain = prompt | self.local_llm | StrOutputParser()
-        return chain.invoke({"gdd": gdd_content})
+        return prompt | self.llm | StrOutputParser()
