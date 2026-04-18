@@ -1,7 +1,8 @@
 import arcade
 import os
 from pathlib import Path
-
+from PIL import Image
+import arcade
 
 class AssetManager:
     """
@@ -18,9 +19,9 @@ class AssetManager:
         """
         # normalize path 
         filename = os.path.splitext(os.path.basename(path))[0].lower() + ".png" # 統一小寫 + 強制格式為.png
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         image_path = os.path.join(project_root, "output_games", "generated_game", "picture", filename)
-
+        print("Loading:", image_path)
         # search cache
         if image_path in cls._textures:
             return cls._textures[image_path]
@@ -30,6 +31,15 @@ class AssetManager:
                 raise FileNotFoundError(f"File not found: {image_path}")
 
             texture = arcade.load_texture(image_path)
+
+            # 用 NEAREST 放大 8 倍
+            img = texture.image.resize(
+                (texture.width * 8, texture.height * 8),
+                Image.Resampling.NEAREST
+            )
+
+            texture = arcade.Texture(name=image_path, image=img)
+
             cls._textures[image_path] = texture
             return texture
 
