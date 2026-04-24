@@ -26,3 +26,10 @@
 **/.venv/
 **/venv/
 **/.python-version
+
+
+# MacOS
+**/.DS_Store
+
+#
+temp/
