@@ -12,6 +12,7 @@ from src.prompts.code_generation_prompts import ART_PROMPT
 def generate_assets(
         gdd_context: str,
         provider: str = "openai",
+        log_callback = print,
 ) -> str:
     """
     Generate the art assets for this specific game using the LangChain factory.
@@ -53,8 +54,9 @@ def generate_assets(
 
     try:
         response = chain.invoke({"gdd": gdd_context})
-        
-        print("=== RAW OUTPUT ===")
+
+        log_callback("[AssetGen]")
+        log_callback("=== RAW OUTPUT ===")
         # print(response)
 
         json_match = re.search(r"\{.*\}", response, re.DOTALL)
@@ -68,17 +70,17 @@ def generate_assets(
         for name, asset in assets.items():
 
             if "describe" in asset:
-                print(f"[AssetGen] Generating image for: {name}")
+                log_callback(f"[AssetGen] Generating image for: {name}")
 
                 description = asset["describe"]
                 size = asset.get("size", [64, 64])
 
-                filename = picture_generate(name, description, size)
+                filename = picture_generate(name, description, size, log_callback=log_callback)
                 # 可選：把 filename 記錄回 JSON
                 asset["filename"] = filename
 
         return json.dumps(assets, indent=2)
 
     except Exception as e:
-        print(f"[AssetGen Error] {e}")
+        log_callback(f"[AssetGen Error] {e}")
         return "{}"
