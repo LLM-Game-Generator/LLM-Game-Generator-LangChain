@@ -72,6 +72,7 @@ class Config:
     PROMPT_COMPRESS_MODEL_NAME = os.getenv("PROMPT_COMPRESS_MODEL_NAME")
 
     # --- ComfyUI ---
+    USING_PICTURE_GENERATE = os.getenv("USING_PICTURE_GENERATE", False)
     COMFYUI_BASE_URL = os.getenv("COMFYUI_BASE_URL", "http://127.0.0.1:8188")
 
     # --- ChromaDB ---
