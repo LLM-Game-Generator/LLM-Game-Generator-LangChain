@@ -23,10 +23,17 @@ def with_llm_injection(provider=None, model=None, temperature=None):
     [Decorator Factory]
     可以在 @with_llm_injection(provider="openai", ...) 這裡帶入參數
     """
+
     def decorator(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
-            llm = self._resolve_llm(provider, model, temperature)
+            chain_cfg = getattr(self, 'chain_configs', {}).get(func.__name__, {})
+
+            p = kwargs.pop('provider', chain_cfg.get('provider', provider))
+            m = kwargs.pop('model', chain_cfg.get('model', model))
+            t = kwargs.pop('temperature', chain_cfg.get('temperature', temperature))
+
+            llm = self._resolve_llm(p, m, t)
 
             return func(self, llm, *args, **kwargs)
 
@@ -36,14 +43,11 @@ def with_llm_injection(provider=None, model=None, temperature=None):
 
 
 class ArcadeAgentChain:
-    def __init__(self, provider="mistral", model="codestral:latest", temperature=0.7):
+    def __init__(self, default_config, chain_configs):
         self.token_tracker = TokenTrackerCallback()
-        self.default_config = {
-            "provider": provider,
-            "model": model,
-            "temperature": temperature
-        }
-        self.llm = self._make_llm(provider, model, temperature)
+        self.default_config = default_config
+        self.chain_configs = chain_configs
+        self.llm = self._make_llm(**default_config)
         self.json_parser = JsonOutputParser(pydantic_object=TechnicalPlan)
         self.fixing_codes_parser = JsonOutputParser(pydantic_object=FixingCodes)
 
@@ -77,14 +81,14 @@ class ArcadeAgentChain:
             ("user", "User Idea: {idea}\nCEO Analysis: {analysis}\nFeedback: {feedback}")
         ])
         return prompt | llm | StrOutputParser()
-    
+
     @with_llm_injection()
     def get_reviewer_chain(self, llm):
         prompt = ChatPromptTemplate.from_messages([
             SystemMessage(content=CPO_REVIEW_PROMPT),
             ("user", "Current GDD:\n{gdd}\n\n"
                      "Provide feedback to improve this design."
-            )
+             )
         ])
         return prompt | llm | StrOutputParser()
 
@@ -97,7 +101,7 @@ class ArcadeAgentChain:
                      "Assets:\n{assets}\n\n"
                      "Task: Plan the game architecture. \n"
                      "{format_instructions}"
-            )
+             )
         ])
         return prompt | llm | self.json_parser
 
@@ -142,7 +146,7 @@ class ArcadeAgentChain:
             SystemMessage(content=PLAN_REVIEW_PROMPT),
             ("user", "Architecture Plan:\n{plan}\n\n"
                      "Analyze for API correctness and Grid safety."
-            )
+             )
         ])
         return prompt | llm | StrOutputParser()
 
