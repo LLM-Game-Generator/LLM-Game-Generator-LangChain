@@ -1,5 +1,7 @@
 import sys
 import os
+import time
+
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO
 
@@ -7,7 +9,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")
 
 from src.config import config
 from src.generation.core.core import run_full_generator_pipeline
-from src.utils import save_generated_files
+from src.utils import save_generated_files, api_status
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config['SECRET_KEY'] = config.SECRET_KEY
@@ -71,5 +73,11 @@ def generate_game():
 
 
 if __name__ == '__main__':
+    # Send request to ComfyUI, if it's not started, telling the user to start.
+    comfyui_is_online = False
+    while not comfyui_is_online:
+        comfyui_is_online = api_status("ComfyUI", config.COMFYUI_BASE_URL, stream_log)
+        time.sleep(3)
+
     # Use allow_unsafe_werkzeug=True to run with the Flask development server
     socketio.run(app, debug=False, port=5000, allow_unsafe_werkzeug=True)
