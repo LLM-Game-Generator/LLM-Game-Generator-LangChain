@@ -3,6 +3,7 @@
 
 **/flask_session/
 
+cache/
 
 # log
 **/*log
@@ -26,3 +27,10 @@
 **/.venv/
 **/venv/
 **/.python-version
+
+
+# MacOS
+**/.DS_Store
+
+#
+temp/

@@ -3,12 +3,10 @@ import chromadb.errors
 import hashlib
 import requests
 import urllib3
-import re
 from chromadb.api.types import Documents, Embeddings, EmbeddingFunction
 from chromadb.config import Settings
 from chromadb.utils import embedding_functions
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Any
 
 from src.config import Config, config
 
@@ -221,7 +219,8 @@ class RagService:
 
 # Global Instance
 rag_config = RagConfig(collection_name=config.ARCADE_COLLECTION_NAME)
-rag_instance = RagService(rag_config=rag_config)
+# rag_instance = RagService(rag_config=rag_config)
+rag_instance = None
 
 
 # if __name__ == '__main__':

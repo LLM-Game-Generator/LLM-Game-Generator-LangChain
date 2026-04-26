@@ -27,7 +27,7 @@ def get_env_ssl_verify(key: str, default):
 
 
 class Config:
-    # 專案路徑
+    # --- Project Paths ---
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     PROJECT_ROOT = os.path.dirname(BASE_DIR)
     OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output_games")
@@ -43,6 +43,7 @@ class Config:
     MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
     DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
     INCEPTION_API_KEY = os.getenv("INCEPTION_API_KEY")
+    CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
 
     # --- LLM Models ---
     GROQ_MODEL_NAME = os.getenv("GROQ_MODEL_NAME", "llama3-8b-8192")
@@ -51,8 +52,9 @@ class Config:
     MISTRAL_MODEL_NAME = os.getenv("MISTRAL_MODEL_NAME", "codestral-latest")
     DEEPSEEK_MODEL_NAME = os.getenv("DEEPSEEK_MODEL_NAME", "deepseek-chat")
     INCEPTION_MODEL_NAME = os.getenv("INCEPTION_MODEL_NAME", "inception")
+    CLAUDE_MODEL_NAME = os.getenv("CLAUDE_MODEL_NAME", "claude-sonnet-4-6")
 
-    # --- OLLAMA ---
+    # --- Ollama ---
     OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
     OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY")
     OLLAMA_MODEL_NAME = os.getenv("OLLAMA_MODEL_NAME", "llama3:8b")
@@ -66,6 +68,14 @@ class Config:
     LLM_EMBEDDING_SERVER_PORT = os.getenv("LLM_EMBEDDING_SERVER_PORT", "")
     LLM_EMBEDDING_MODEL_TYPE = os.getenv("LLM_EMBEDDING_MODEL_TYPE")
     LLM_EMBEDDING_CLIENT_TOKEN = os.getenv("LLM_EMBEDDING_CLIENT_TOKEN")
+
+    # --- Prompt Compression ---
+    PROMPT_COMPRESS_PROVIDER = os.getenv("PROMPT_COMPRESS_PROVIDER")
+    PROMPT_COMPRESS_MODEL_NAME = os.getenv("PROMPT_COMPRESS_MODEL_NAME")
+
+    # --- ComfyUI ---
+    USING_PICTURE_GENERATE = False
+    COMFYUI_BASE_URL = os.getenv("COMFYUI_BASE_URL", "http://127.0.0.1:8188")
 
     # --- ChromaDB ---
     CHROMA_TENANT = os.getenv("CHROMA_TENANT", "default_tenant")
