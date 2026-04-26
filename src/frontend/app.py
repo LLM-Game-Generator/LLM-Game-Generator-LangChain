@@ -74,10 +74,10 @@ def generate_game():
 
 if __name__ == '__main__':
     # Send request to ComfyUI, if it's not started, telling the user to start.
-    comfyui_is_online = False
-    while not comfyui_is_online:
-        comfyui_is_online = api_status("ComfyUI", config.COMFYUI_BASE_URL, stream_log)
-        time.sleep(3)
+    # comfyui_is_online = False
+    # while not comfyui_is_online:
+    #     comfyui_is_online = api_status("ComfyUI", config.COMFYUI_BASE_URL, stream_log)
+    #     time.sleep(3)
 
     # Use allow_unsafe_werkzeug=True to run with the Flask development server
     socketio.run(app, debug=False, port=5000, allow_unsafe_werkzeug=True)
