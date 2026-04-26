@@ -16,7 +16,7 @@ def picture_generate(name, description, size, log_callback = print):
 
     if size[0] < 32 and size[1] < 32: # 圖片極小 (w < 32 AND h < 32)
         log_callback(f"[PicGen] {name} is too small ({size}), using fall back.")
-        return 
+        return
     
     # ---------- 等比例放大到 >= 512 ----------
     original_size = size.copy() # 記住原尺寸
