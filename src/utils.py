@@ -1,6 +1,6 @@
 import os
 import re
-
+import requests
 
 def clean_code_content(content: str) -> str:
     """
@@ -52,3 +52,20 @@ def save_generated_files(file_dict: dict, base_dir: str):
             game_path = file_path
 
     return game_path
+
+def api_status(test_name, url, log_callback):
+
+    try:
+        response = requests.get(url, timeout=3)
+        if response.status_code == 200:
+            log_callback(f'[Success] {test_name} is online.')
+            return True
+        else:
+            log_callback(f'[Warning] {test_name} server responded with status code: {response.status_code}')
+            return False
+    except requests.exceptions.ConnectionError:
+        log_callback(f'[Error] Could not connect to {test_name}. Make sure the server is running.')
+        return False
+    except Exception as e:
+        log_callback(f"[Error] An unexpected error occurred when connecting to {test_name}: {e}")
+        return False
