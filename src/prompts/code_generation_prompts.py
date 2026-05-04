@@ -1,20 +1,27 @@
 ART_PROMPT = """
 You are an Art Director. 
-Task: Analyze the GDD and define visuals using simple GEOMETRY.
-Constraint: Do NOT use image files. Use distinct RGB Colors and Shapes.
+Task: Analyze the GDD and define the visual assets required for the game. For each asset, write a descriptive prompt that will be sent to an AI Image Generator (Diffusion model).
 Output: Valid JSON only.
 
-CRITICAL RULE FOR size ARRAY:
-The size MUST contain ONLY absolute integer values (e.g., [800, 400], [32, 32]).
-NEVER use string variables, constants, or expressions like "SCREEN_WIDTH" or "TABLE_HEIGHT". If you need a size, estimate it in absolute pixels.
+CRITICAL RULES:
+1. Each asset MUST contain ONLY TWO keys: "describe" and "size".
+2. "describe": A single short, concrete sentence describing what the image should look like.
+3. "size": A list of exactly two absolute integer values [width, height] in pixels.
+4. Do NOT include "shape" or "color" keys.
+5. NEVER use string variables, constants, or expressions like "SCREEN_WIDTH" in the size array.
+6. BASE ENTITIES ONLY: If the game has multiple objects of the same type but different colors (e.g., 15 pool balls), generate ONLY ONE base texture (e.g., "base_ball") in grayscale or white. DO NOT generate grouped images like "a triangle of balls". The programmer will tint them individually in code.
+7. STRICT 2D TOP-DOWN PERSPECTIVE: The game uses a strict 2D physics engine. ALL assets, especially backgrounds, tables, and environments, MUST explicitly include descriptions like "top-down 2D, strictly flat, viewed directly from straight above, no 3D perspective". If it has perspective, the physics will look broken.
 
 Example Output:
 {{
-  "background_color": [0, 0, 0],
-  "player": {{ "shape": "rect", "color": [0, 255, 0], "size": [30, 30] }},
-  "enemy": {{ "shape": "circle", "color": [255, 0, 0], "size": [20, 20] }},
-  "collectible": {{ "shape": "rect", "color": [255, 255, 0], "size": [15, 15] }},
-  ...
+  "pool_table": {{
+    "describe": "a plain green pool table surface with brown wooden borders, top-down 2D, strictly flat, viewed directly from straight above, no 3D perspective",
+    "size": [800, 400]
+  }},
+  "base_ball": {{
+    "describe": "a plain white billiard ball, top-down 2D, flat",
+    "size": [32, 32]
+  }}
 }}
 """
 
@@ -61,18 +68,17 @@ Task: Write the complete 'game.py' based on the Design and Assets.
      - `arcade.draw_rectangle_filled(center_x, center_y, width, height, color)`
      - `arcade.draw_text(text, start_x, start_y, color, font_size)`
    - **Colors**: Use `arcade.color.COLOR_NAME` only.
-3. **texture management**
-   - there's an imported file called asset_manager.py, which helps you to create and manage the texture.
-   - Texture Constructor: AssetManager.get_texture(cls, path: str, fallback_color=arcade.color.MAGENTA, width=32, height=32)
-   **ASSET DESCRIPTION**: Immediately after each get_texture call, write a short, concrete text description of the asset for image generation.\n"
-   - Must be one line only.
-   - Must clearly describe what the sprite should look like.
-   - Example: `# DESCRIPTION: a brave knight in shining armor wielding a sword
-   - Always include this DESCRIPTION comment for every asset.
-   for example:     ```python
-                        bullet.texture = AssetManager.get_texture('bullet', fallback_color=arcade.color.YELLOW, width=8, height=8)
-                        # DESCRIPTION: a small yellow circular bullet
-                    ```
+3. **Texture Management (CRITICAL AST PARSER RULES)**:
+   - There's an imported file called `asset_manager.py`. You MUST use it for all textures.
+   - Method Signature: `AssetManager.get_texture(path: str, fallback_color=..., width=..., height=..., description=...)`
+   - **RULE A (NO F-STRINGS)**: The `path` MUST be a hardcoded string literal (e.g., `'player'`). **DO NOT use f-strings**, variable concatenation, or loops for the image path. Our static AST parser will IGNORE dynamic names and break the game!
+   - **RULE B (DESCRIPTION PARAM)**: You MUST pass a `description` string argument to clearly describe what the sprite should look like for the AI image generator.
+   - **RULE C (TINTING HACK)**: If you need multiple colored variations of the same object (like 15 pool balls), load ONE base texture (e.g., `'base_ball'`), and color it dynamically: `sprite = arcade.Sprite(texture=tex); sprite.color = (R, G, B)`. DO NOT generate 15 different textures.
+   - Example:
+     ```python
+     bullet = arcade.Sprite()
+     bullet.texture = AssetManager.get_texture('bullet', fallback_color=arcade.color.YELLOW, width=8, height=8, description='a small yellow circular bullet')
+     ```
 
 【CODE STRUCTURE TEMPLATE (MANDATORY)】:
 You MUST use this exact structure. Do NOT change the View classes, only fill in the `MyGame` logic.
@@ -83,7 +89,6 @@ import random
 import math
 import time
 import pymunk 
-from PIL import Image, ImageDraw
 
 # --- Constants ---
 SCREEN_WIDTH = 800
@@ -164,8 +169,7 @@ class MyGame(arcade.View):
         # TODO: Initialize Player and Sprites here
         # Example:
         self.player = arcade.Sprite()
-        self.player.texture = AssetManager.get_texture('player', fallback_color=arcade.color.RED, width=32, height=32)
-        # DESCRIPTION: a green military apple with a cannon facing forward
+        self.player.texture = AssetManager.get_texture('player', fallback_color=arcade.color.RED, width=32, height=32, description='a green military tank facing forward')
         self.player.center_x = SCREEN_WIDTH // 2
         self.player.center_y = SCREEN_HEIGHT // 2
         self.player_list.append(self.player)
@@ -178,9 +182,7 @@ class MyGame(arcade.View):
         self.enemy_list.draw()
 
         # --- HUD (Heads Up Display) ---
-        # Score
         arcade.draw_text(f"Score: {{self.score}}", 10, SCREEN_HEIGHT - 30, arcade.color.WHITE, 14)
-        # Timer
         current_time = time.time() - self.start_time
         arcade.draw_text(f"Time: {{current_time:.1f}}", SCREEN_WIDTH - 100, SCREEN_HEIGHT - 30, arcade.color.WHITE, 14)
 
@@ -216,6 +218,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
+
+OUTPUT RAW PYTHON CODE ONLY. NO MARKDOWN.
 """
 
 FUZZER_GENERATION_PROMPT = """
