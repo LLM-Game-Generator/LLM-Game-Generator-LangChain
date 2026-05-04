@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 from dotenv import load_dotenv
@@ -36,6 +37,28 @@ class Config:
     __TIMESTAMP = time.strftime('%y%m%d%H%M%S')
 
     TIMESTAMP_OUTPUT_DIR = os.path.join(__OUTPUT_DIR, __TIMESTAMP)
+
+    # Logging
+    LOG_FILE_PATH = os.path.join(TIMESTAMP_OUTPUT_DIR, "log.txt")
+    os.makedirs(os.path.dirname(LOG_FILE_PATH), exist_ok=True)
+    LOGGER = logging.getLogger("GameGenerator")
+    LOGGER.setLevel(logging.DEBUG)
+    if not LOGGER.handlers:
+        formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+
+        # --- Handler A: Write to log file ---
+        file_handler = logging.FileHandler(LOG_FILE_PATH, encoding="utf-8")
+        file_handler.setLevel(logging.INFO)
+        file_handler.setFormatter(formatter)
+
+        # --- Handler B: Write to console ---
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(formatter)
+
+        # Bind two loggers
+        LOGGER.addHandler(file_handler)
+        LOGGER.addHandler(console_handler)
 
     SECRET_KEY = os.getenv("SECRET_KEY", "dev_secret_key")
 

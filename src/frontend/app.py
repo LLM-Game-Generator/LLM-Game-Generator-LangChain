@@ -25,9 +25,15 @@ def stream_log(message):
     Push logs to the frontend via SocketIO.
     This provides real-time feedback to the user interface.
     """
-    print(message)
+    logger = config.LOGGER
+    message_cf = message.casefold()
+    if "error".casefold() in message_cf:
+        logger.error(message)
+    elif "warn".casefold() in message_cf:
+        logger.warning(message)
+    else:
+        logger.info(message)
     socketio.emit('agent_log', {'data': message})
-
 
 @app.route('/')
 def index():
