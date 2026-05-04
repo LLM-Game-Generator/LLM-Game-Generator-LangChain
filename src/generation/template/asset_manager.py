@@ -13,7 +13,7 @@ class AssetManager:
     _sounds = {}
 
     @classmethod
-    def get_texture(cls, path: str, fallback_color=arcade.color.MAGENTA, width=32, height=32) -> arcade.Texture:
+    def get_texture(cls, path: str, fallback_color = arcade.color.MAGENTA, width = 32, height = 32, description: str = "") -> arcade.Texture:
         """
         Normalize LLM's function call. Safely load a texture. Generates a solid color square if not found.
         """

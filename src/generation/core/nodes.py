@@ -186,9 +186,9 @@ def fixer_node(state: GameState, agents, prompt_compress_agents, log_callback, w
     history_errors = state["test_errors"][:-1]
     error_prompt = latest_error
     if history_errors:
-        #compressed_history = prompt_compress_agents.compress_errors(history_errors)
-        #error_prompt = f"[Past Failed Attempts (Do NOT repeat these mistakes)]:\n{compressed_history}\n\n[Latest Error]:\n{latest_error}"
-        error_prompt = f"[Past Failed Attempts (Do NOT repeat these mistakes)]:\n{history_errors}\n\n[Latest Error]:\n{latest_error}"
+        compressed_history = prompt_compress_agents.compress_errors(history_errors)
+        error_prompt = f"[Past Failed Attempts (Do NOT repeat these mistakes)]:\n{compressed_history}\n\n[Latest Error]:\n{latest_error}"
+        # error_prompt = f"[Past Failed Attempts (Do NOT repeat these mistakes)]:\n{history_errors}\n\n[Latest Error]:\n{latest_error}"
 
     if "[LogicError]" in latest_error:
         response = agents.get_logic_fixer_chain().invoke({

@@ -116,7 +116,7 @@ def generate_game():
 
         # Save the finalized files to the output directory
         stream_log("Saving final files...")
-        output_path = os.path.join(config.OUTPUT_DIR, "generated_game")
+        output_path = config.TIMESTAMP_OUTPUT_DIR
 
         if not os.path.exists(output_path):
             os.makedirs(output_path)

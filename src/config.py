@@ -1,4 +1,5 @@
 import os
+import time
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -30,7 +31,11 @@ class Config:
     # --- Project Paths ---
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     PROJECT_ROOT = os.path.dirname(BASE_DIR)
-    OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output_games")
+    __OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output_games")
+
+    __TIMESTAMP = time.strftime('%y%m%d%H%M%S')
+
+    TIMESTAMP_OUTPUT_DIR = os.path.join(__OUTPUT_DIR, __TIMESTAMP)
 
     SECRET_KEY = os.getenv("SECRET_KEY", "dev_secret_key")
 

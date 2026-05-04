@@ -119,7 +119,14 @@ def _programmer_node_constraints(state: GameState, log_callback) -> str:
         "5. Implement a proper Game Over view and Restart mechanic."
     )
     constraints = "\n".join(state["architecture_plan"].get('constraints', []))
-    full_constraints = f"{constraints}\n\n{complexity_constraints}"
+    assets_str = state.get("assets_json", "{}")
+    full_constraints = (
+        f"=== AVAILABLE ASSETS FROM ART DIRECTOR ===\n"
+        f"You MUST strictly use the texture names defined in this JSON. DO NOT invent new ones.\n"
+        f"{assets_str}\n\n"
+        f"=== CONSTRAINTS ===\n"
+        f"{constraints}\n\n{complexity_constraints}"
+    )
     return full_constraints
 
 def _programmer_node_extract_safe_constants(code: str) -> dict:
