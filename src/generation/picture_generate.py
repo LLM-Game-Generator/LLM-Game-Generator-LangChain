@@ -29,8 +29,8 @@ def picture_generate(name, description, size, log_callback=print):
     # [防呆 2] 提早設定存檔路徑，並檢查是否已存在 (避免重複生成)
     # ==========================================
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    pic_dir = os.path.join(project_root, "output_games", "generated_game", "picture")
-    hitbox_dir = os.path.join(project_root, "output_games", "generated_game", "hitbox")
+    pic_dir = os.path.join(project_root, config.TIMESTAMP_OUTPUT_DIR, "picture")
+    hitbox_dir = os.path.join(project_root, config.TIMESTAMP_OUTPUT_DIR, "hitbox")
 
     os.makedirs(pic_dir, exist_ok=True)
     os.makedirs(hitbox_dir, exist_ok=True)

@@ -1,4 +1,5 @@
 import os
+import time
 from src.config import config
 from src.generation.core.chains import ArcadeAgentChain
 from src.generation.utils.prompt_compress_node import LocalPromptCompressor
@@ -17,8 +18,10 @@ def run_full_generator_pipeline(user_input, log_callback=print, default_config: 
         temperature=0.1
     )
 
+
+
     # Output dir
-    output_path = os.path.join(config.OUTPUT_DIR, "generated_game")
+    output_path = config.TIMESTAMP_OUTPUT_DIR
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
