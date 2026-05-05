@@ -87,7 +87,10 @@ def plan_reviewer_node(state: GameState, agents: ArcadeAgentChain, log_callback)
 def programmer_node(state: GameState, agents: ArcadeAgentChain, prompt_compress_agents, log_callback, work_dir):
     math_injection = _programmer_node_math_injection(state, log_callback)
 
-    needed_templates = _programmer_node_choose_templates(state, agents, prompt_compress_agents, log_callback)
+    token_tracker = agents.get_token_tracker()
+    with token_tracker.track_step("template_decision"):
+        needed_templates = _programmer_node_choose_templates(state, agents, prompt_compress_agents, log_callback)
+
 
     [template_code_blocks,
      guaranteed_imports ,
@@ -98,8 +101,7 @@ def programmer_node(state: GameState, agents: ArcadeAgentChain, prompt_compress_
     """
     ================== Generating codes ==========================
     """
-    
-    token_tracker = agents.get_token_tracker()
+
     with token_tracker.track_step("programmer"):
         response = agents.get_programmer_chain().invoke({
             "architecture_plan": state["architecture_plan"],
@@ -119,7 +121,10 @@ def programmer_node(state: GameState, agents: ArcadeAgentChain, prompt_compress_
     cleaned_code = _programmer_node_apply_import_failsafe(cleaned_code, guaranteed_imports, log_callback)
 
     log_callback("[Programmer] [Test] Generating Fuzzer logic snippet...")
-    fuzzer_response = agents.get_fuzzer_chain().invoke({"gdd": state["gdd"]})
+
+    with token_tracker.track_step("fuzzer"):
+        fuzzer_response = agents.get_fuzzer_chain().invoke({"gdd": state["gdd"]})
+
     fuzzer_logic = fuzzer_response.content if hasattr(fuzzer_response, 'content') else str(fuzzer_response)
     cleaned_fuzzer_logic = clean_code_content(fuzzer_logic)
 
